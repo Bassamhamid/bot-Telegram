@@ -1,4 +1,4 @@
-const TELEGRAM_TOKEN = '7609107592:AAFug6uaSA_jWLtKFsXI2nBky0OJM4RJPNI';
+
 const CACHE = CacheService.getScriptCache();
 
 // قاموس متكامل بجميع الكلمات
