@@ -1,30 +1,35 @@
 require('dotenv').config();
 const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// تهيئة البوت
+// ========== التحقق من المتغيرات البيئية ========== //
+const requiredEnvVars = ['TELEGRAM_TOKEN', 'GEMINI_API_KEY'];
+requiredEnvVars.forEach(varName => {
+  if (!process.env[varName]) {
+    console.error(`❌ Error: Missing ${varName} environment variable`);
+    process.exit(1);
+  }
+});
+
+// ========== تهيئة البوت وGemini ========== //
 const bot = new TelegramBot(process.env.TELEGRAM_TOKEN);
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 app.use(express.json());
 
-// تعريف Webhook مع رابطك الخاص
-const webhookUrl = 'https://my-telegram-bot-8zl0.onrender.com/webhook';
+// ========== إعداد Webhook ========== //
+const webhookUrl = process.env.WEBHOOK_URL || `https://${process.env.RENDER_EXTERNAL_HOSTNAME || 'my-telegram-bot-8zl0.onrender.com'}/webhook`;
 bot.setWebHook(webhookUrl);
 
-// معالجة الرسائل الواردة
+// ========== معالجة Webhook ========== //
 app.post('/webhook', (req, res) => {
   bot.processUpdate(req.body);
   res.sendStatus(200);
 });
 
-// تشغيل الخادم
-app.listen(PORT, () => {
-  console.log(`✅ البوت يعمل على المنفذ ${PORT}`);
-  console.log(`🌐 Webhook URL: ${webhookUrl}`);
-});
-
-// قاموس الكلمات
+// ========== قاموس الكلمات ========== //
 const DICTIONARY = {
   "فندقة": {
     variations: ["الفندقة", "فندقي", "فندق", "فندقه", "فندكة"],
@@ -79,33 +84,74 @@ const DICTIONARY = {
     answer: "يد 🖐 (أداة للإمساك أو الإشارة)"
   },
   "شنحام": {
-  variations: ["شنحامي", "شناحيم", "شنحوم"],
-  answer: "رجل كبير في السن"
-},
+    variations: ["شنحامي", "شناحيم", "شنحوم"],
+    answer: "رجل كبير في السن"
+  }
 };
 
-// معالجة أمر /start
+// ========== دالة الذكاء الاصطناعي ========== //
+async function getAIResponse(prompt) {
+  try {
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-pro",
+      generationConfig: {
+        maxOutputTokens: 150,
+        temperature: 0.7
+      }
+    });
+
+    const result = await model.generateContent({
+      contents: [{
+        parts: [{
+          text: `أنت بوت متخصص في لهجة عتمة اليمنية. أجب بطريقة واضحة ومختصرة.
+السؤال: ${prompt}`
+        }]
+      }]
+    });
+    
+    return result.response.text();
+  } catch (error) {
+    console.error("Error with Gemini:", error);
+    return "⚠️ حدث خطأ في المعالجة، حاول مرة أخرى";
+  }
+}
+
+// ========== معالجة الأوامر ========== //
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
   bot.sendMessage(chatId, 
     "🏮 <b>مرحباً ببوت كاشف الفندقة!</b>\n" +
     "✍️ اكتب أي كلمة من لهجة عتمة لمعرفة معناها\n\n" +
-    "🔍 أمثلة: <code>فندقة</code> - <code>شلالة</code> - <code>مجبر حمس</code>",
+    "🔍 أمثلة: <code>فندقة</code> - <code>شلالة</code> - <code>مجبر حمس</code>\n\n" +
+    "🧠 يمكنك أيضًا سؤال البوت عن أي شيء وسيحاول المساعدة!",
     { parse_mode: "HTML" });
 });
 
-// معالجة الرسائل النصية
-bot.on('message', (msg) => {
-  const chatId = msg.chat.id;
-  const text = msg.text?.trim();
-  
-  if (!text || text.startsWith('/')) return;
-  
-  const answer = findAnswer(text) || "⚠️ لم يتم العثور على الكلمة في القاموس";
-  bot.sendMessage(chatId, answer);
+// ========== معالجة الرسائل ========== //
+bot.on('message', async (msg) => {
+  try {
+    if (!msg.text) return;
+    
+    const chatId = msg.chat.id;
+    const userMessage = msg.text.trim();
+
+    // 1. البحث في القاموس أولاً
+    const localAnswer = findAnswer(userMessage);
+    if (localAnswer) {
+      return await bot.sendMessage(chatId, localAnswer);
+    }
+
+    // 2. الذكاء الاصطناعي إذا لم يوجد رد محلي
+    const aiResponse = await getAIResponse(userMessage);
+    await bot.sendMessage(chatId, aiResponse);
+
+  } catch (error) {
+    console.error("Error processing message:", error);
+    await bot.sendMessage(msg.chat.id, "⚠️ حدث خطأ في المعالجة، حاول مرة أخرى");
+  }
 });
 
-// دالة البحث في القاموس
+// ========== دالة البحث في القاموس ========== //
 function findAnswer(query) {
   const cleanQuery = query.toLowerCase()
     .replace(/[أإآءئؤ]/g, 'ا')
@@ -127,3 +173,10 @@ function findAnswer(query) {
   }
   return null;
 }
+
+// ========== تشغيل الخادم ========== //
+app.listen(PORT, () => {
+  console.log(`✅ البوت يعمل على المنفذ ${PORT}`);
+  console.log(`🌐 Webhook URL: ${webhookUrl}`);
+  console.log("⚡ Bot is ready to handle messages");
+});
