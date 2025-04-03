@@ -1,2 +1,10 @@
-node_modules/
+# ملفات البيئة
 .env
+.env.*
+!.env.example
+
+# مجلد التبعيات
+node_modules/
+
+# ملفات السجلات
+*.log
