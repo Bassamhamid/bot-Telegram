@@ -1,20 +1,25 @@
 {
   "name": "telegram-bot",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js",
     "dev": "nodemon bot.js",
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "deploy": "git push origin main"
+    "setup-webhook": "node ./scripts/setup-webhook.js",
+    "test": "jest"
   },
   "dependencies": {
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "node-telegram-bot-api": "^0.61.0",
-    "@google/generative-ai": "^0.8.0"
+    "@google/generative-ai": "^0.9.0",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2",
+    "jest": "^29.7.0"
   },
   "engines": {
-    "node": "18.x"
+    "node": ">=18.0.0"
   }
 }
