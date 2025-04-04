@@ -21,7 +21,7 @@ if (!fs.existsSync(DICTIONARY_PATH)) {
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const ADMIN_ID = process.env.ADMIN_ID;
-const PORT = process.env.PORT || 3001; // تغيير البورت الافتراضي
+const PORT = process.env.PORT || 3001;
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
@@ -33,13 +33,17 @@ if (!token || !GEMINI_API_KEY || !ADMIN_ID || !WEBHOOK_URL || !WEBHOOK_SECRET) {
 
 // إنشاء البوت
 const bot = new TelegramBot(token, {
-  polling: false // تعطيل البولينج لأننا نستخدم ويب هوك
+  polling: false,
+  webHook: {
+    port: PORT
+  }
 });
 
 // تحميل القاموس
 let dictionary = {};
 try {
   dictionary = JSON.parse(fs.readFileSync(DICTIONARY_PATH, 'utf-8'));
+  console.log(`✅ تم تحميل ${Object.keys(dictionary).length} كلمة من القاموس`);
 } catch (err) {
   console.error('❌ خطأ في قراءة القاموس:', err);
 }
@@ -61,9 +65,12 @@ bot.onText(/^\/addword (.+?):(.+)$/, async (msg, match) => {
     dictionary[word] = explanation;
     fs.writeFileSync(DICTIONARY_PATH, JSON.stringify(dictionary, null, 2), 'utf-8');
     await bot.sendMessage(msg.chat.id, `✅ تمت الإضافة:\n${word}: ${explanation}`);
+    
+    // إرسال تنبيه للمشرف
+    await bot.sendMessage(ADMIN_ID, `تمت إضافة كلمة جديدة: ${word}`);
   } catch (error) {
     console.error('خطأ في الإضافة:', error);
-    await bot.sendMessage(msg.chat.id, '❌ حدث خطأ!');
+    await bot.sendMessage(msg.chat.id, '❌ حدث خطأ أثناء الإضافة!');
   }
 });
 
@@ -94,11 +101,14 @@ async function explainWithGemini(input) {
 
 // ========== [معالجة الرسائل] ========== //
 bot.on('message', async (msg) => {
+  console.log('📥 رسالة واردة:', msg.text); // للتتبع
+  
   if (!msg.text || msg.text.startsWith('/')) return;
 
   try {
     const loadingMsg = await bot.sendMessage(msg.chat.id, '🔍 جاري البحث...');
     const explanation = await explainWithGemini(msg.text.trim());
+    
     await bot.editMessageText(explanation, {
       chat_id: msg.chat.id,
       message_id: loadingMsg.message_id
@@ -109,23 +119,38 @@ bot.on('message', async (msg) => {
   }
 });
 
-// ========== [إعدادات الخادم] ========== //
-const startServer = (port) => {
-  const server = app.listen(port, () => {
-    console.log(`🚀 يعمل على البورت ${port}`);
-    
-    // تفعيل الويب هوك بعد نجاح تشغيل الخادم
-    bot.setWebHook(`${WEBHOOK_URL}/webhook`, {
+// ========== [إعدادات الويب هوك] ========== //
+const setupWebhook = async () => {
+  try {
+    await bot.setWebHook(`${WEBHOOK_URL}/webhook`, {
       secret_token: WEBHOOK_SECRET,
-      allowed_updates: ['message']
-    }).then(() => console.log('✅ تم تفعيل الويب هوك'))
-    .catch(err => console.error('❌ فشل تفعيل الويب هوك:', err));
+      allowed_updates: ['message', 'callback_query'],
+      drop_pending_updates: true
+    });
+    
+    const webhookInfo = await bot.getWebHookInfo();
+    console.log('✅ معلومات الويب هوك:', {
+      url: webhookInfo.url,
+      pending: webhookInfo.pending_update_count,
+      lastError: webhookInfo.last_error_date
+    });
+  } catch (error) {
+    console.error('❌ فشل تفعيل الويب هوك:', error);
+    process.exit(1);
+  }
+};
+
+// ========== [إعدادات الخادم] ========== //
+const startServer = () => {
+  const server = app.listen(PORT, async () => {
+    console.log(`🚀 الخادم يعمل على البورت ${PORT}`);
+    await setupWebhook();
   });
 
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
-      console.log(`⚠️ البورت ${port} مشغول، جرب البورت ${parseInt(port) + 1}`);
-      startServer(parseInt(port) + 1);
+      console.log(`⚠️ البورت ${PORT} مشغول، جرب ${parseInt(PORT) + 1}`);
+      startServer(parseInt(PORT) + 1);
     } else {
       console.error('❌ خطأ في الخادم:', err);
       process.exit(1);
@@ -133,22 +158,36 @@ const startServer = (port) => {
   });
 };
 
+// ========== [مسارات API] ========== //
 app.post('/webhook', (req, res) => {
+  console.log('📩 طلب وارد:', req.body); // تسجيل الطلبات
+  
   if (req.headers['x-telegram-bot-api-secret-token'] !== WEBHOOK_SECRET) {
+    console.warn('⛔ محاولة وصول غير مصرح بها');
     return res.sendStatus(403);
   }
-  bot.processUpdate(req.body);
-  res.sendStatus(200);
+
+  try {
+    bot.processUpdate(req.body);
+    res.json({ status: 'processed' });
+  } catch (error) {
+    console.error('💥 خطأ في المعالجة:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 app.get('/', (req, res) => {
-  res.json({ status: 'running', version: '2.0.3' });
+  res.json({
+    status: 'running',
+    version: '2.0.4',
+    dictionaryCount: Object.keys(dictionary).length
+  });
 });
 
-// بدء الخادم
-startServer(PORT);
+// بدء التشغيل
+startServer();
 
-// معالجة الأخطاء غير الملتقطة
+// معالجة الأخطاء
 process.on('unhandledRejection', (err) => {
   console.error('⚠️ خطأ غير معالج:', err);
 });
