@@ -32,8 +32,12 @@ if (!token || !GEMINI_API_KEY || !ADMIN_ID || !WEBHOOK_URL || !WEBHOOK_SECRET) {
   process.exit(1);
 }
 
-// إنشاء البوت بدون polling
-const bot = new TelegramBot(token);
+// إنشاء البوت مع إعدادات Webhook الصحيحة
+const bot = new TelegramBot(token, {
+  webHook: {
+    port: PORT
+  }
+});
 
 // تحميل القاموس
 let dictionary = {};
@@ -123,23 +127,31 @@ async function handleWord(msg, word) {
 }
 
 // تفعيل Webhook مع السر السري
-bot.setWebhook(`${WEBHOOK_URL}/webhook`, {
+bot.setWebHook(`${WEBHOOK_URL}/webhook`, {
+  certificate: null, // لا تستخدم شهادة SSL مخصصة
   secret_token: WEBHOOK_SECRET
 }).then(() => {
-  console.log('✅ تم تفعيل الويب هوك بنجاح');
+  console.log('✅ تم تفعيل الويب هوك بنجاح على:', `${WEBHOOK_URL}/webhook`);
 }).catch(err => {
   console.error('❌ فشل تفعيل الويب هوك:', err.message);
+  process.exit(1);
 });
 
 // endpoint لاستقبال التحديثات
 app.post('/webhook', (req, res) => {
   // التحقق من السر السري
   if (req.headers['x-telegram-bot-api-secret-token'] !== WEBHOOK_SECRET) {
+    console.warn('⚠️ محاولة وصول غير مصرح بها');
     return res.sendStatus(403);
   }
   
-  bot.processUpdate(req.body);
-  res.sendStatus(200);
+  try {
+    bot.processUpdate(req.body);
+    res.sendStatus(200);
+  } catch (error) {
+    console.error('❌ خطأ في معالجة التحديث:', error);
+    res.sendStatus(500);
+  }
 });
 
 // الأوامر الأساسية
@@ -175,12 +187,27 @@ bot.on('message', async (msg) => {
 
 // صفحة رئيسية للتأكد من أن الخدمة تعمل
 app.get('/', (req, res) => {
-  res.send('🤖 البوت يعمل في وضع الويب هوك');
+  res.status(200).json({
+    status: 'running',
+    service: 'Telegram Bot Webhook',
+    version: '2.0.0'
+  });
 });
 
 // بدء الخادم
 app.listen(PORT, () => {
-  console.log(`🚀 الخادم يعمل على المنفذ ${PORT}`);
-  console.log(`🌐 Webhook URL: ${WEBHOOK_URL}/webhook`);
-  console.log(`🔒 Webhook Secret: ${WEBHOOK_SECRET}`);
+  console.log(`
+  🚀 الخادم يعمل على المنفذ ${PORT}
+  🌐 Webhook URL: ${WEBHOOK_URL}/webhook
+  🔒 Webhook Secret: ${WEBHOOK_SECRET ? 'تم التعيين' : 'غير معين!'}
+  `);
+});
+
+// معالجة الأخطاء غير الملتقطة
+process.on('unhandledRejection', (error) => {
+  console.error('⚠️ خطأ غير معالج:', error);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('⚠️ استثناء غير معالج:', error);
 });
