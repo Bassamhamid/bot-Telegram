@@ -9,7 +9,7 @@ console.log('=== إعدادات البوت ===');
 console.log({
   token: process.env.TELEGRAM_BOT_TOKEN ? '✔ موجود' : '❌ مفقود',
   webhookUrl: process.env.WEBHOOK_URL,
-  port: process.env.PORT || 3001 // تغيير البورت الافتراضي
+  port: process.env.PORT || 3001
 });
 
 const app = express();
@@ -29,7 +29,7 @@ if (!fs.existsSync(DICTIONARY_PATH)) {
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const ADMIN_ID = process.env.ADMIN_ID;
-const PORT = process.env.PORT || 3001; // استخدام 3001 كبديل
+const PORT = parseInt(process.env.PORT, 10) || 3001;
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
@@ -53,46 +53,51 @@ try {
   console.error('❌ خطأ في تحميل القاموس:', err);
 }
 
-// الدوال والأوامر (تبقى كما هي بدون تغيير)
+// ===== أوامر البوت =====
 bot.onText(/^\/addword (.+?):(.+)$/, async (msg, match) => {
-  // ... [الكود الحالي]
+  const chatId = msg.chat.id;
+  const [_, word, meaning] = match;
+
+  dictionary[word.trim()] = meaning.trim();
+  fs.writeFileSync(DICTIONARY_PATH, JSON.stringify(dictionary, null, 2));
+
+  bot.sendMessage(chatId, `✅ تمت إضافة الكلمة "${word}"`);
 });
 
 async function explainWithGemini(input) {
-  // ... [الكود الحالي]
+  try {
+    const response = await axios.post(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent',
+      {
+        contents: [{ parts: [{ text: input }] }]
+      },
+      {
+        params: { key: GEMINI_API_KEY }
+      }
+    );
+
+    return response.data?.candidates?.[0]?.content?.parts?.[0]?.text || '❌ لم يتم الحصول على رد.';
+  } catch (err) {
+    console.error('❌ خطأ في طلب Gemini:', err.message);
+    return '⚠️ حدث خطأ أثناء التواصل مع Gemini.';
+  }
 }
 
 bot.on('message', async (msg) => {
-  // ... [الكود الحالي]
+  const chatId = msg.chat.id;
+  const text = msg.text?.trim();
+
+  if (!text || text.startsWith('/')) return;
+
+  if (dictionary[text]) {
+    bot.sendMessage(chatId, `📖 المعنى: ${dictionary[text]}`);
+  } else {
+    const reply = await explainWithGemini(`اشرح كلمة باللهجة اليمنية "عتمة": ${text}`);
+    bot.sendMessage(chatId, reply);
+  }
 });
 
-// ===== الحل الجديد لمعالجة مشكلة البورت =====
-const startServer = (port = PORT) => {
-  const server = app.listen(port, async () => {
-    console.log(`🚀 يعمل على البورت ${port}`);
-    
-    try {
-      await bot.setWebHook(`${WEBHOOK_URL}/webhook`, {
-        secret_token: WEBHOOK_SECRET,
-        drop_pending_updates: true
-      });
-      console.log('✅ ويب هوك مفعل');
-    } catch (err) {
-      console.error('❌ فشل تفعيل الويب هوك:', err);
-    }
-  });
-
-  server.on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-      const newPort = parseInt(port) + 1;
-      console.log(`⚠️ جرب البورت ${newPort}...`);
-      startServer(newPort);
-    } else {
-      console.error('❌ خطأ في الخادم:', err);
-    }
-  });
-};
-
+// ===== معالجة الويب هوك =====
 app.post('/webhook', (req, res) => {
   if (req.headers['x-telegram-bot-api-secret-token'] !== WEBHOOK_SECRET) {
     console.warn('⛔ وصول غير مصرح به');
@@ -114,6 +119,38 @@ app.get('/', (req, res) => {
     dictionaryCount: Object.keys(dictionary).length
   });
 });
+
+// ===== حل مشكلة البورت مستخدم =====
+const startServer = (port = PORT, maxTries = 10, tryCount = 0) => {
+  const server = app.listen(port, async () => {
+    console.log(`🚀 يعمل على البورت ${port}`);
+    try {
+      await bot.setWebHook(`${WEBHOOK_URL}/webhook`, {
+        secret_token: WEBHOOK_SECRET,
+        drop_pending_updates: true
+      });
+      console.log('✅ ويب هوك مفعل');
+    } catch (err) {
+      console.error('❌ فشل تفعيل الويب هوك:', err.message);
+    }
+  });
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      if (tryCount < maxTries) {
+        const newPort = port + 1;
+        console.warn(`⚠️ البورت ${port} مستخدم، تجربة البورت ${newPort}...`);
+        startServer(newPort, maxTries, tryCount + 1);
+      } else {
+        console.error('❌ لا يوجد بورت متاح بعد محاولات متعددة.');
+        process.exit(1);
+      }
+    } else {
+      console.error('❌ خطأ في الخادم:', err);
+      process.exit(1);
+    }
+  });
+};
 
 // بدء التشغيل
 startServer();
