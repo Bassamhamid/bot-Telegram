@@ -114,7 +114,7 @@ async function handleWord(msg, word) {
     if (dictionary[wordTrimmed]) {
       await bot.sendMessage(chatId, `📖 شرح "${wordTrimmed}":\n${dictionary[wordTrimmed]}`, {
         reply_markup: {
-          inline_keyboard: [[{ text: '⚠️ إبلاغ عن خطأ', callback_data: `report_${wordTrimmed}` }]
+          inline_keyboard: [[{ text: '⚠️ إبلاغ عن خطأ', callback_data: `report_${wordTrimmed}` }]] // أضفت قوس إغلاق هنا
         }
       });
     } else {
