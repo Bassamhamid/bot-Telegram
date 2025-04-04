@@ -21,7 +21,7 @@ if (!fs.existsSync(DICTIONARY_PATH)) {
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const ADMIN_ID = process.env.ADMIN_ID;
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 0; // 0 يعني أي بورت متاح
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
@@ -111,10 +111,23 @@ bot.on('message', async (msg) => {
 });
 
 // ========== [إعدادات الويب هوك] ========== //
-bot.setWebHook(`${WEBHOOK_URL}/webhook`, {
-  secret_token: WEBHOOK_SECRET,
-  allowed_updates: ['message']
-}).then(() => console.log('✅ تم تفعيل الويب هوك'));
+const startServer = () => {
+  const server = app.listen(PORT, () => {
+    const actualPort = server.address().port;
+    console.log(`🚀 يعمل على البورت ${actualPort}`);
+    
+    // تفعيل الويب هوك بعد معرفة البورت الفعلي
+    bot.setWebHook(`${WEBHOOK_URL}/webhook`, {
+      secret_token: WEBHOOK_SECRET,
+      allowed_updates: ['message']
+    }).then(() => console.log('✅ تم تفعيل الويب هوك'));
+  });
+
+  server.on('error', (err) => {
+    console.error('❌ خطأ في الخادم:', err);
+    process.exit(1);
+  });
+};
 
 app.post('/webhook', (req, res) => {
   if (req.headers['x-telegram-bot-api-secret-token'] !== WEBHOOK_SECRET) {
@@ -125,24 +138,11 @@ app.post('/webhook', (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.json({ status: 'running', version: '2.0.1' });
+  res.json({ status: 'running', version: '2.0.2' });
 });
 
 // بدء الخادم
-const server = app.listen(PORT, () => {
-  console.log(`🚀 يعمل على البورت ${PORT}`);
-});
-
-server.on('error', (err) => {
-  if (err.code === 'EADDRINUSE') {
-    const newPort = parseInt(PORT) + 1;
-    console.log(`⚠️ البورت ${PORT} مشغول، جرب ${newPort}`);
-    app.listen(newPort);
-  } else {
-    console.error('❌ خطأ في الخادم:', err);
-    process.exit(1);
-  }
-});
+startServer();
 
 // معالجة الأخطاء غير الملتقطة
 process.on('unhandledRejection', (err) => {
