@@ -1,10 +1,15 @@
 require('dotenv').config();
+const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 
-// مسار ملف القاموس (باستخدام path.join لأمان أكثر)
+// تهيئة Express
+const app = express();
+app.use(express.json());
+
+// مسار ملف القاموس
 const DICTIONARY_PATH = path.join(__dirname, 'dictionary.json');
 
 // إنشاء ملف القاموس إذا لم يكن موجوداً
@@ -16,6 +21,8 @@ if (!fs.existsSync(DICTIONARY_PATH)) {
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const ADMIN_ID = process.env.ADMIN_ID;
+const PORT = process.env.PORT || 3000;
+const WEBHOOK_URL = process.env.WEBHOOK_URL || `https://your-render-url.onrender.com`;
 
 // تأكد من وجود المتغيرات المطلوبة
 if (!token || !GEMINI_API_KEY || !ADMIN_ID) {
@@ -23,7 +30,8 @@ if (!token || !GEMINI_API_KEY || !ADMIN_ID) {
   process.exit(1);
 }
 
-const bot = new TelegramBot(token, { polling: true });
+// إنشاء البوت بدون polling
+const bot = new TelegramBot(token);
 
 // تحميل القاموس
 let dictionary = {};
@@ -40,7 +48,6 @@ function saveWordToDictionary(word, explanation, user) {
   dictionary[word] = explanation;
   fs.writeFileSync(DICTIONARY_PATH, JSON.stringify(dictionary, null, 2), 'utf-8');
   
-  // إرسال إشعار للمسؤول
   bot.sendMessage(
     ADMIN_ID,
     `تمت إضافة كلمة جديدة:\nالكلمة: ${word}\nالشرح: ${explanation}\nبواسطة: @${user.username || user.first_name}`
@@ -113,6 +120,15 @@ async function handleWord(msg, word) {
   }
 }
 
+// تهيئة Webhook
+bot.setWebHook(`${WEBHOOK_URL}/bot${token}`);
+
+// endpoint لاستقبال التحديثات
+app.post(`/bot${token}`, (req, res) => {
+  bot.processUpdate(req.body);
+  res.sendStatus(200);
+});
+
 // الأوامر الأساسية
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
@@ -144,4 +160,13 @@ bot.on('message', async (msg) => {
   await handleWord(msg, msg.text);
 });
 
-console.log('🤖 البوت يعمل الآن...');
+// صفحة رئيسية للتأكد من أن الخدمة تعمل
+app.get('/', (req, res) => {
+  res.send('Bot is running in Webhook mode');
+});
+
+// بدء الخادم
+app.listen(PORT, () => {
+  console.log(`🤖 البوت يعمل الآن على المنفذ ${PORT}`);
+  console.log(`🔗 Webhook URL: ${WEBHOOK_URL}/bot${token}`);
+});
