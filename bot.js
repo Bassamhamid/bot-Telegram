@@ -2,133 +2,146 @@ require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
 const fs = require('fs');
-const DICTIONARY_PATH = './dictionary.json';
+const path = require('path');
 
-// التأكد من وجود ملف dictionary.json
+// مسار ملف القاموس (باستخدام path.join لأمان أكثر)
+const DICTIONARY_PATH = path.join(__dirname, 'dictionary.json');
+
+// إنشاء ملف القاموس إذا لم يكن موجوداً
 if (!fs.existsSync(DICTIONARY_PATH)) {
   fs.writeFileSync(DICTIONARY_PATH, JSON.stringify({}, null, 2), 'utf-8');
 }
-// تحميل المتغيرات
+
+// تحميل المتغيرات البيئية
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const ADMIN_ID = process.env.ADMIN_ID;
 
+// تأكد من وجود المتغيرات المطلوبة
+if (!token || !GEMINI_API_KEY || !ADMIN_ID) {
+  console.error('❌ يرجى تعيين جميع المتغيرات البيئية المطلوبة!');
+  process.exit(1);
+}
+
 const bot = new TelegramBot(token, { polling: true });
 
-let dictionary = JSON.parse(fs.readFileSync('./dictionary.json', 'utf-8'));
+// تحميل القاموس
+let dictionary = {};
+try {
+  dictionary = JSON.parse(fs.readFileSync(DICTIONARY_PATH, 'utf-8'));
+} catch (err) {
+  console.error('❌ خطأ في قراءة ملف القاموس:', err.message);
+}
+
 const userCache = new Set();
 
-// حفظ كلمة جديدة في القاموس
+// دالة لحفظ الكلمات الجديدة
 function saveWordToDictionary(word, explanation, user) {
   dictionary[word] = explanation;
-  fs.writeFileSync('./dictionary.json', JSON.stringify(dictionary, null, 2), 'utf-8');
-
-  // إرسال إشعار للمطور
+  fs.writeFileSync(DICTIONARY_PATH, JSON.stringify(dictionary, null, 2), 'utf-8');
+  
+  // إرسال إشعار للمسؤول
   bot.sendMessage(
     ADMIN_ID,
-    `تمت إضافة كلمة جديدة للقاموس:\nالكلمة: ${word}\nالمعنى: ${explanation}\nبواسطة: @${user.username || user.first_name}`
+    `تمت إضافة كلمة جديدة:\nالكلمة: ${word}\nالشرح: ${explanation}\nبواسطة: @${user.username || user.first_name}`
   );
 }
 
-// استدعاء Gemini
+// دالة للاستعلام من Gemini API
 async function explainWithGemini(word) {
   try {
     const response = await axios.post(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent',
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${GEMINI_API_KEY}`,
       {
         contents: [{
           parts: [{
-            text: `اشرح الكلمة "${word}" من لهجة عتمة اليمنية، وإذا لم تكن ضمن اللهجة أو غير معروفة، أخبرني بأنها غير موجودة في القاموس.`
+            text: `اشرح الكلمة "${word}" من لهجة عتمة اليمنية، وإذا لم تكن معروفة أخبرني فقط أنها غير موجودة.`
           }]
         }]
       },
       {
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': GEMINI_API_KEY
-        }
+        headers: { 'Content-Type': 'application/json' }
       }
     );
 
-    const output = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    return output || '';
+    return response.data?.candidates?.[0]?.content?.parts?.[0]?.text || 'لا يوجد شرح متاح';
   } catch (error) {
-    console.error('Gemini API Error:', error.message);
-    return '';
+    console.error('🔴 خطأ في Gemini API:', error.message);
+    return 'حدث خطأ أثناء جلب الشرح من الذكاء الاصطناعي';
   }
 }
 
-// التعامل مع الكلمات
+// معالجة الكلمات المطلوبة
 async function handleWord(msg, word) {
   const chatId = msg.chat.id;
   const wordTrimmed = word.trim();
   const user = msg.from;
 
   if (dictionary[wordTrimmed]) {
-    bot.sendMessage(chatId, `شرح "${wordTrimmed}":\n${dictionary[wordTrimmed]}`, {
+    bot.sendMessage(chatId, `📖 شرح "${wordTrimmed}":\n${dictionary[wordTrimmed]}`, {
       reply_markup: {
-        inline_keyboard: [[{ text: 'إبلاغ عن خطأ في الشرح', callback_data: `report_${wordTrimmed}` }]]
+        inline_keyboard: [[{ text: '⚠️ إبلاغ عن خطأ', callback_data: `report_${wordTrimmed}` }]]
       }
     });
   } else {
-    const geminiExplanation = await explainWithGemini(wordTrimmed);
+    const loadingMsg = await bot.sendMessage(chatId, '🔍 جاري البحث عن شرح...');
 
-    if (!geminiExplanation || geminiExplanation.includes('غير موجودة') || geminiExplanation.includes('لا أعرف')) {
-      bot.sendMessage(chatId, `عذرًا، لا توجد معلومات عن الكلمة "${wordTrimmed}".`);
-    } else {
-      bot.sendMessage(chatId, `شرح AI لكلمة "${wordTrimmed}":\n${geminiExplanation}`, {
-        reply_markup: {
-          inline_keyboard: [[{ text: 'إبلاغ عن خطأ في الشرح', callback_data: `report_${wordTrimmed}` }]]
-        }
+    try {
+      const geminiExplanation = await explainWithGemini(wordTrimmed);
+
+      if (geminiExplanation.includes('غير موجودة') || geminiExplanation.includes('لا أعرف')) {
+        bot.editMessageText(`❌ لا يوجد شرح لكلمة "${wordTrimmed}" في القاموس.`, {
+          chat_id: chatId,
+          message_id: loadingMsg.message_id
+        });
+      } else {
+        bot.editMessageText(`🤖 شرح "${wordTrimmed}":\n${geminiExplanation}`, {
+          chat_id: chatId,
+          message_id: loadingMsg.message_id,
+          reply_markup: {
+            inline_keyboard: [[{ text: '⚠️ إبلاغ عن خطأ', callback_data: `report_${wordTrimmed}` }]]
+          }
+        });
+        saveWordToDictionary(wordTrimmed, geminiExplanation, user);
+      }
+    } catch (error) {
+      bot.editMessageText('⚠️ حدث خطأ أثناء معالجة طلبك.', {
+        chat_id: chatId,
+        message_id: loadingMsg.message_id
       });
-      saveWordToDictionary(wordTrimmed, geminiExplanation, user);
     }
   }
 }
 
-// أوامر البوت
+// الأوامر الأساسية
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
-  if (!userCache.has(chatId)) {
-    userCache.add(chatId);
-    bot.sendMessage(chatId, 'مرحبًا بك في بوت شرح لهجة "عتمة" اليمنية! أرسل أي كلمة لأشرحها لك.');
-  } else {
-    bot.sendMessage(chatId, 'أهلاً مجددًا! أرسل أي كلمة تريد شرحها.');
-  }
+  bot.sendMessage(chatId, 'مرحباً بك في بوت قاموس لهجة عتمة اليمنية! ✨\n\nاكتب أي كلمة لشرحها.');
 });
 
 bot.onText(/\/help/, (msg) => {
-  bot.sendMessage(msg.chat.id, 'اكتب أي كلمة من لهجة عتمة اليمنية وسأشرحها لك، أو استخدم /words لعرض بعض الأمثلة.');
-});
-
-bot.onText(/\/about/, (msg) => {
-  bot.sendMessage(msg.chat.id, 'تم تطوير هذا البوت لشرح مفردات لهجة عتمة اليمنية باستخدام قاموس مخصص وذكاء صناعي من Gemini.');
+  bot.sendMessage(msg.chat.id, '🛟 المساعدة:\n- اكتب أي كلمة لشرحها\n- /words لعرض أمثلة\n- /about لمعلومات عن البوت');
 });
 
 bot.onText(/\/words/, (msg) => {
-  const exampleWords = Object.keys(dictionary).slice(0, 10).join(', ');
-  bot.sendMessage(msg.chat.id, `بعض الكلمات التي يمكنك تجربتها:\n${exampleWords}`);
+  const examples = Object.keys(dictionary).slice(0, 5).join('\n- ');
+  bot.sendMessage(msg.chat.id, `🔠 أمثلة على الكلمات:\n- ${examples || 'لا توجد كلمات بعد'}`);
 });
 
-// الرد على الضغط على زر "إبلاغ عن خطأ"
-bot.on('callback_query', (callbackQuery) => {
-  const chatId = callbackQuery.message.chat.id;
-  const user = callbackQuery.from;
+// معالجة التقارير
+bot.on('callback_query', async (callbackQuery) => {
   const data = callbackQuery.data;
-
   if (data.startsWith('report_')) {
-    const wordReported = data.replace('report_', '');
-
-    bot.sendMessage(ADMIN_ID, `تم الإبلاغ عن خطأ في شرح الكلمة "${wordReported}" من قبل المستخدم: @${user.username || user.first_name}`);
-
-    bot.answerCallbackQuery(callbackQuery.id, { text: 'تم إرسال بلاغك إلى المطور. شكراً لك!' });
+    const word = data.replace('report_', '');
+    await bot.answerCallbackQuery(callbackQuery.id, { text: 'تم إرسال التقرير للمسؤول ✅' });
+    bot.sendMessage(ADMIN_ID, `⚠️ تقرير جديد:\nالكلمة: ${word}\nمن المستخدم: ${callbackQuery.from.username || callbackQuery.from.first_name}`);
   }
 });
 
-// التعامل مع أي رسالة نصية غير أوامر
+// معالجة الرسائل العادية
 bot.on('message', async (msg) => {
-  const text = msg.text?.trim();
-  if (text && !text.startsWith('/')) {
-    await handleWord(msg, text);
-  }
+  if (!msg.text || msg.text.startsWith('/')) return;
+  await handleWord(msg, msg.text);
 });
+
+console.log('🤖 البوت يعمل الآن...');
