@@ -38,12 +38,7 @@ if (!token || !GEMINI_API_KEY || !ADMIN_ID || !WEBHOOK_URL || !WEBHOOK_SECRET) {
   process.exit(1);
 }
 
-const bot = new TelegramBot(token, {
-  polling: false,
-  webHook: {
-    port: PORT
-  }
-});
+const bot = new TelegramBot(token, { polling: false });
 
 let dictionary = {};
 try {
@@ -114,13 +109,13 @@ app.post('/webhook', (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.json({ 
+  res.json({
     status: 'running',
     dictionaryCount: Object.keys(dictionary).length
   });
 });
 
-// ===== حل مشكلة البورت مستخدم =====
+// ===== بدء الخادم وتفعيل الويب هوك =====
 const startServer = (port = PORT, maxTries = 10, tryCount = 0) => {
   const server = app.listen(port, async () => {
     console.log(`🚀 يعمل على البورت ${port}`);
@@ -152,7 +147,6 @@ const startServer = (port = PORT, maxTries = 10, tryCount = 0) => {
   });
 };
 
-// بدء التشغيل
 startServer();
 
 process.on('unhandledRejection', (err) => {
