@@ -104,6 +104,58 @@ async function explainWithGemini(word) {
   }
 }
 
+// ========== [إضافة أمر /addword يدوياً] ========== //
+bot.onText(/^\/addword (.+?):(.+)$/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+
+  // تحقق إذا كان المستخدم هو المسؤول
+  if (userId.toString() !== ADMIN_ID) {
+    return bot.sendMessage(chatId, '⛔ ليس لديك صلاحية إضافة كلمات!');
+  }
+
+  const word = match[1].trim();
+  const explanation = match[2].trim();
+
+  try {
+    // التحقق من وجود الكلمة مسبقاً
+    if (dictionary[word]) {
+      return bot.sendMessage(chatId, 
+        `⚠️ الكلمة "${word}" موجودة بالفعل في القاموس!\nالشرح الحالي: ${dictionary[word]}`
+      );
+    }
+
+    // إضافة الكلمة للقاموس
+    dictionary[word] = explanation;
+    fs.writeFileSync(DICTIONARY_PATH, JSON.stringify(dictionary, null, 2), 'utf-8');
+    
+    await bot.sendMessage(
+      chatId,
+      `✅ تمت إضافة الكلمة بنجاح:\n\nالكلمة: ${word}\n\nالشرح: ${explanation}`
+    );
+    
+    // إرسال نسخة للمسؤول
+    await bot.sendMessage(
+      ADMIN_ID,
+      `تمت إضافة كلمة يدوياً:\nالكلمة: ${word}\nالشرح: ${explanation}\nبواسطة: @${msg.from.username || msg.from.first_name}`
+    );
+    
+  } catch (error) {
+    console.error('خطأ في إضافة الكلمة:', error);
+    await bot.sendMessage(chatId, '❌ حدث خطأ أثناء إضافة الكلمة!');
+  }
+});
+
+// تحقق من تنسيق رسالة /addword
+bot.onText(/^\/addword/, (msg) => {
+  if (!msg.text.includes(':')) {
+    return bot.sendMessage(msg.chat.id, 
+      '⚠️ استخدم التنسيق الصحيح:\n/addword الكلمة:شرح الكلمة\nمثال:\n/addword عتمة:لهجة يمنية'
+    );
+  }
+});
+// ========== [/نهاية إضافة الأمر] ========== //
+
 // معالجة الكلمات المطلوبة (محدثة)
 async function handleWord(msg, word) {
   const chatId = msg.chat.id;
@@ -186,7 +238,7 @@ bot.onText(/\/start/, async (msg) => {
 
 bot.onText(/\/help/, async (msg) => {
   try {
-    await bot.sendMessage(msg.chat.id, '🛟 المساعدة:\n- اكتب أي كلمة لشرحها\n- /words لعرض أمثلة\n- /about لمعلومات عن البوت');
+    await bot.sendMessage(msg.chat.id, '🛟 المساعدة:\n- اكتب أي كلمة لشرحها\n- /words لعرض أمثلة\n- /about لمعلومات عن البوت\n- /addword (للمسؤول فقط)');
   } catch (error) {
     console.error('خطأ في أمر /help:', error);
   }
