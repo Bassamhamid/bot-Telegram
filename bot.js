@@ -8,6 +8,7 @@ const path = require('path');
 // تهيئة Express
 const app = express();
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // مسار ملف القاموس
 const DICTIONARY_PATH = path.join(__dirname, 'dictionary.json');
@@ -22,10 +23,11 @@ const token = process.env.TELEGRAM_BOT_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const ADMIN_ID = process.env.ADMIN_ID;
 const PORT = process.env.PORT || 3000;
-const WEBHOOK_URL = process.env.WEBHOOK_URL || `https://your-render-url.onrender.com`;
+const WEBHOOK_URL = process.env.WEBHOOK_URL;
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
 // تأكد من وجود المتغيرات المطلوبة
-if (!token || !GEMINI_API_KEY || !ADMIN_ID) {
+if (!token || !GEMINI_API_KEY || !ADMIN_ID || !WEBHOOK_URL || !WEBHOOK_SECRET) {
   console.error('❌ يرجى تعيين جميع المتغيرات البيئية المطلوبة!');
   process.exit(1);
 }
@@ -120,11 +122,22 @@ async function handleWord(msg, word) {
   }
 }
 
-// تهيئة Webhook
-bot.setWebHook(`${WEBHOOK_URL}/bot${token}`);
+// تفعيل Webhook مع السر السري
+bot.setWebhook(`${WEBHOOK_URL}/webhook`, {
+  secret_token: WEBHOOK_SECRET
+}).then(() => {
+  console.log('✅ تم تفعيل الويب هوك بنجاح');
+}).catch(err => {
+  console.error('❌ فشل تفعيل الويب هوك:', err.message);
+});
 
 // endpoint لاستقبال التحديثات
-app.post(`/bot${token}`, (req, res) => {
+app.post('/webhook', (req, res) => {
+  // التحقق من السر السري
+  if (req.headers['x-telegram-bot-api-secret-token'] !== WEBHOOK_SECRET) {
+    return res.sendStatus(403);
+  }
+  
   bot.processUpdate(req.body);
   res.sendStatus(200);
 });
@@ -162,11 +175,12 @@ bot.on('message', async (msg) => {
 
 // صفحة رئيسية للتأكد من أن الخدمة تعمل
 app.get('/', (req, res) => {
-  res.send('Bot is running in Webhook mode');
+  res.send('🤖 البوت يعمل في وضع الويب هوك');
 });
 
 // بدء الخادم
 app.listen(PORT, () => {
-  console.log(`🤖 البوت يعمل الآن على المنفذ ${PORT}`);
-  console.log(`🔗 Webhook URL: ${WEBHOOK_URL}/bot${token}`);
+  console.log(`🚀 الخادم يعمل على المنفذ ${PORT}`);
+  console.log(`🌐 Webhook URL: ${WEBHOOK_URL}/webhook`);
+  console.log(`🔒 Webhook Secret: ${WEBHOOK_SECRET}`);
 });
