@@ -4,6 +4,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const net = require('net');
 
 // تهيئة Express
 const app = express();
@@ -22,21 +23,32 @@ if (!fs.existsSync(DICTIONARY_PATH)) {
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const ADMIN_ID = process.env.ADMIN_ID;
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000; // تغيير البورت الافتراضي إلى 10000
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
-// تأكد من وجود المتغيرات المطلوبة
-if (!token || !GEMINI_API_KEY || !ADMIN_ID || !WEBHOOK_URL || !WEBHOOK_SECRET) {
-  console.error('❌ يرجى تعيين جميع المتغيرات البيئية المطلوبة!');
-  process.exit(1);
+// التحقق من المتغيرات البيئية المطلوبة
+const requiredVars = {
+  TELEGRAM_BOT_TOKEN: token,
+  GEMINI_API_KEY: GEMINI_API_KEY,
+  ADMIN_ID: ADMIN_ID,
+  WEBHOOK_URL: WEBHOOK_URL,
+  WEBHOOK_SECRET: WEBHOOK_SECRET
+};
+
+for (const [name, value] of Object.entries(requiredVars)) {
+  if (!value) {
+    console.error(`❌ المتغير البيئي ${name} غير معرّف!`);
+    process.exit(1);
+  }
 }
 
-// إنشاء البوت مع إعدادات Webhook الصحيحة
+// إنشاء البوت مع إعدادات Webhook
 const bot = new TelegramBot(token, {
   webHook: {
     port: PORT
-  }
+  },
+  onlyFirstMatch: true
 });
 
 // تحميل القاموس
@@ -57,14 +69,14 @@ function saveWordToDictionary(word, explanation, user) {
   bot.sendMessage(
     ADMIN_ID,
     `تمت إضافة كلمة جديدة:\nالكلمة: ${word}\nالشرح: ${explanation}\nبواسطة: @${user.username || user.first_name}`
-  );
+  ).catch(console.error);
 }
 
-// دالة للاستعلام من Gemini API
+// دالة للاستعلام من Gemini API (محدثة)
 async function explainWithGemini(word) {
   try {
     const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${GEMINI_API_KEY}`,
       {
         contents: [{
           parts: [{
@@ -73,141 +85,199 @@ async function explainWithGemini(word) {
         }]
       },
       {
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-goog-api-key': GEMINI_API_KEY
+        },
+        timeout: 10000 // 10 ثواني كحد أقصى
       }
     );
 
     return response.data?.candidates?.[0]?.content?.parts?.[0]?.text || 'لا يوجد شرح متاح';
   } catch (error) {
-    console.error('🔴 خطأ في Gemini API:', error.message);
+    console.error('🔴 خطأ في Gemini API:', {
+      status: error.response?.status,
+      data: error.response?.data,
+      message: error.message
+    });
     return 'حدث خطأ أثناء جلب الشرح من الذكاء الاصطناعي';
   }
 }
 
-// معالجة الكلمات المطلوبة
+// معالجة الكلمات المطلوبة (محدثة)
 async function handleWord(msg, word) {
   const chatId = msg.chat.id;
   const wordTrimmed = word.trim();
   const user = msg.from;
 
-  if (dictionary[wordTrimmed]) {
-    bot.sendMessage(chatId, `📖 شرح "${wordTrimmed}":\n${dictionary[wordTrimmed]}`, {
-      reply_markup: {
-        inline_keyboard: [[{ text: '⚠️ إبلاغ عن خطأ', callback_data: `report_${wordTrimmed}` }]]
-      }
-    });
-  } else {
-    const loadingMsg = await bot.sendMessage(chatId, '🔍 جاري البحث عن شرح...');
-
-    try {
+  try {
+    if (dictionary[wordTrimmed]) {
+      await bot.sendMessage(chatId, `📖 شرح "${wordTrimmed}":\n${dictionary[wordTrimmed]}`, {
+        reply_markup: {
+          inline_keyboard: [[{ text: '⚠️ إبلاغ عن خطأ', callback_data: `report_${wordTrimmed}` }]
+        }
+      });
+    } else {
+      const loadingMsg = await bot.sendMessage(chatId, '🔍 جاري البحث عن شرح...');
+      
       const geminiExplanation = await explainWithGemini(wordTrimmed);
-
+      
       if (geminiExplanation.includes('غير موجودة') || geminiExplanation.includes('لا أعرف')) {
-        bot.editMessageText(`❌ لا يوجد شرح لكلمة "${wordTrimmed}" في القاموس.`, {
+        await bot.editMessageText(`❌ لا يوجد شرح لكلمة "${wordTrimmed}" في القاموس.`, {
           chat_id: chatId,
           message_id: loadingMsg.message_id
         });
       } else {
-        bot.editMessageText(`🤖 شرح "${wordTrimmed}":\n${geminiExplanation}`, {
+        await bot.editMessageText(`🤖 شرح "${wordTrimmed}":\n${geminiExplanation}`, {
           chat_id: chatId,
           message_id: loadingMsg.message_id,
           reply_markup: {
-            inline_keyboard: [[{ text: '⚠️ إبلاغ عن خطأ', callback_data: `report_${wordTrimmed}` }]]
+            inline_keyboard: [[{ text: '⚠️ إبلاغ عن خطأ', callback_data: `report_${wordTrimmed}` }]
           }
         });
         saveWordToDictionary(wordTrimmed, geminiExplanation, user);
       }
-    } catch (error) {
-      bot.editMessageText('⚠️ حدث خطأ أثناء معالجة طلبك.', {
-        chat_id: chatId,
-        message_id: loadingMsg.message_id
-      });
     }
+  } catch (error) {
+    console.error('🔴 خطأ في معالجة الكلمة:', error);
+    await bot.sendMessage(chatId, '⚠️ حدث خطأ أثناء معالجة طلبك، يرجى المحاولة لاحقاً.');
   }
 }
 
-// تفعيل Webhook مع السر السري
+// تفعيل Webhook مع التحسينات
 bot.setWebHook(`${WEBHOOK_URL}/webhook`, {
-  certificate: null, // لا تستخدم شهادة SSL مخصصة
-  secret_token: WEBHOOK_SECRET
+  certificate: null,
+  secret_token: WEBHOOK_SECRET,
+  max_connections: 50,
+  allowed_updates: ['message', 'callback_query']
 }).then(() => {
-  console.log('✅ تم تفعيل الويب هوك بنجاح على:', `${WEBHOOK_URL}/webhook`);
+  console.log('✅ تم تفعيل الويب هوك بنجاح على:', WEBHOOK_URL);
 }).catch(err => {
-  console.error('❌ فشل تفعيل الويب هوك:', err.message);
+  console.error('❌ فشل تفعيل الويب هوك:', err);
   process.exit(1);
 });
 
-// endpoint لاستقبال التحديثات
+// endpoint لاستقبال التحديثات (محدث)
 app.post('/webhook', (req, res) => {
-  // التحقق من السر السري
-  if (req.headers['x-telegram-bot-api-secret-token'] !== WEBHOOK_SECRET) {
-    console.warn('⚠️ محاولة وصول غير مصرح بها');
-    return res.sendStatus(403);
-  }
-  
   try {
+    // التحقق من السر السري
+    if (req.headers['x-telegram-bot-api-secret-token'] !== WEBHOOK_SECRET) {
+      console.warn('⚠️ محاولة وصول غير مصرح بها من IP:', req.ip);
+      return res.sendStatus(403);
+    }
+    
     bot.processUpdate(req.body);
     res.sendStatus(200);
   } catch (error) {
     console.error('❌ خطأ في معالجة التحديث:', error);
-    res.sendStatus(500);
+    res.status(500).send('Internal Server Error');
   }
 });
 
-// الأوامر الأساسية
-bot.onText(/\/start/, (msg) => {
+// الأحداث الأساسية
+bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
-  bot.sendMessage(chatId, 'مرحباً بك في بوت قاموس لهجة عتمة اليمنية! ✨\n\nاكتب أي كلمة لشرحها.');
+  try {
+    await bot.sendMessage(chatId, 'مرحباً بك في بوت قاموس لهجة عتمة اليمنية! ✨\n\nاكتب أي كلمة لشرحها.');
+  } catch (error) {
+    console.error('خطأ في أمر /start:', error);
+  }
 });
 
-bot.onText(/\/help/, (msg) => {
-  bot.sendMessage(msg.chat.id, '🛟 المساعدة:\n- اكتب أي كلمة لشرحها\n- /words لعرض أمثلة\n- /about لمعلومات عن البوت');
+bot.onText(/\/help/, async (msg) => {
+  try {
+    await bot.sendMessage(msg.chat.id, '🛟 المساعدة:\n- اكتب أي كلمة لشرحها\n- /words لعرض أمثلة\n- /about لمعلومات عن البوت');
+  } catch (error) {
+    console.error('خطأ في أمر /help:', error);
+  }
 });
 
-bot.onText(/\/words/, (msg) => {
-  const examples = Object.keys(dictionary).slice(0, 5).join('\n- ');
-  bot.sendMessage(msg.chat.id, `🔠 أمثلة على الكلمات:\n- ${examples || 'لا توجد كلمات بعد'}`);
+bot.onText(/\/words/, async (msg) => {
+  try {
+    const examples = Object.keys(dictionary).slice(0, 5).join('\n- ');
+    await bot.sendMessage(msg.chat.id, `🔠 أمثلة على الكلمات:\n- ${examples || 'لا توجد كلمات بعد'}`);
+  } catch (error) {
+    console.error('خطأ في أمر /words:', error);
+  }
 });
 
 // معالجة التقارير
 bot.on('callback_query', async (callbackQuery) => {
-  const data = callbackQuery.data;
-  if (data.startsWith('report_')) {
-    const word = data.replace('report_', '');
-    await bot.answerCallbackQuery(callbackQuery.id, { text: 'تم إرسال التقرير للمسؤول ✅' });
-    bot.sendMessage(ADMIN_ID, `⚠️ تقرير جديد:\nالكلمة: ${word}\nمن المستخدم: ${callbackQuery.from.username || callbackQuery.from.first_name}`);
+  try {
+    const data = callbackQuery.data;
+    if (data.startsWith('report_')) {
+      const word = data.replace('report_', '');
+      await bot.answerCallbackQuery(callbackQuery.id, { text: 'تم إرسال التقرير للمسؤول ✅' });
+      await bot.sendMessage(ADMIN_ID, `⚠️ تقرير جديد:\nالكلمة: ${word}\nمن المستخدم: ${callbackQuery.from.username || callbackQuery.from.first_name}`);
+    }
+  } catch (error) {
+    console.error('خطأ في معالجة التقرير:', error);
   }
 });
 
 // معالجة الرسائل العادية
 bot.on('message', async (msg) => {
-  if (!msg.text || msg.text.startsWith('/')) return;
-  await handleWord(msg, msg.text);
+  try {
+    if (!msg.text || msg.text.startsWith('/')) return;
+    await handleWord(msg, msg.text);
+  } catch (error) {
+    console.error('خطأ في معالجة الرسالة:', error);
+  }
 });
 
 // صفحة رئيسية للتأكد من أن الخدمة تعمل
 app.get('/', (req, res) => {
   res.status(200).json({
     status: 'running',
-    service: 'Telegram Bot Webhook',
-    version: '2.0.0'
+    service: 'قاموس لهجة عتمة اليمنية',
+    version: '2.0.1',
+    webhook: `${WEBHOOK_URL}/webhook`,
+    uptime: process.uptime()
   });
 });
 
-// بدء الخادم
-app.listen(PORT, () => {
-  console.log(`
-  🚀 الخادم يعمل على المنفذ ${PORT}
-  🌐 Webhook URL: ${WEBHOOK_URL}/webhook
-  🔒 Webhook Secret: ${WEBHOOK_SECRET ? 'تم التعيين' : 'غير معين!'}
-  `);
-});
+// بدء الخادم مع معالجة مشكلة البورت المشغول
+const startServer = (port) => {
+  const tester = net.createServer()
+    .once('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.log(`🔄 البورت ${port} مشغول، جرب ${port + 1}`);
+        startServer(port + 1);
+      }
+    })
+    .once('listening', () => {
+      tester.close(() => {
+        app.listen(port, () => {
+          console.log(`🚀 الخادم يعمل على البورت ${port}`);
+          console.log(`🔗 رابط الويب هوك: ${WEBHOOK_URL}/webhook`);
+        });
+      });
+    })
+    .listen(port);
+};
+
+startServer(PORT);
 
 // معالجة الأخطاء غير الملتقطة
 process.on('unhandledRejection', (error) => {
-  console.error('⚠️ خطأ غير معالج:', error);
+  console.error('⚠️ خطأ غير معالج (Rejection):', error);
 });
 
 process.on('uncaughtException', (error) => {
-  console.error('⚠️ استثناء غير معالج:', error);
+  console.error('⚠️ استثناء غير معالج (Exception):', error);
+  if (error.code === 'EADDRINUSE') {
+    console.log('🔄 إعادة تشغيل الخادم على بورت جديد...');
+    startServer(PORT + 1);
+  }
+});
+
+// إغلاق نظيف عند استقبال إشارة الإيقاف
+process.on('SIGTERM', () => {
+  console.log('🛑 استقبال إشارة إيقاف، إغلاق الخادم...');
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('🛑 استقبال إشارة إنهاء، إغلاق الخادم...');
+  process.exit(0);
 });
