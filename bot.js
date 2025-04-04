@@ -21,7 +21,7 @@ if (!fs.existsSync(DICTIONARY_PATH)) {
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const ADMIN_ID = process.env.ADMIN_ID;
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 3001; // تغيير البورت الافتراضي لتجنب التعارض
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
@@ -49,7 +49,6 @@ try {
 bot.onText(/^\/addword (.+?):(.+)$/, async (msg, match) => {
   const chatId = msg.chat.id;
   
-  // تحقق من صلاحيات المسؤول
   if (msg.from.id.toString() !== ADMIN_ID) {
     return bot.sendMessage(chatId, '⛔ هذا الأمر متاح للمسؤول فقط!');
   }
@@ -59,34 +58,19 @@ bot.onText(/^\/addword (.+?):(.+)$/, async (msg, match) => {
 
   try {
     if (dictionary[word]) {
-      return bot.sendMessage(chatId, 
-        `⚠️ الكلمة "${word}" موجودة بالفعل!`
-      );
+      return bot.sendMessage(chatId, `⚠️ الكلمة "${word}" موجودة بالفعل!`);
     }
 
     dictionary[word] = explanation;
     fs.writeFileSync(DICTIONARY_PATH, JSON.stringify(dictionary, null, 2), 'utf-8');
     
-    await bot.sendMessage(
-      chatId,
-      `✅ تمت إضافة الكلمة:\n${word}: ${explanation}`
-    );
+    await bot.sendMessage(chatId, `✅ تمت إضافة الكلمة:\n${word}: ${explanation}`);
     
   } catch (error) {
     console.error('خطأ في إضافة الكلمة:', error);
     await bot.sendMessage(chatId, '❌ حدث خطأ أثناء الإضافة!');
   }
 });
-
-// التحقق من تنسيق /addword
-bot.onText(/^\/addword/, (msg) => {
-  if (!msg.text.includes(':')) {
-    bot.sendMessage(msg.chat.id, 
-      '⚠️ التنسيق الصحيح: /addword الكلمة:الشرح'
-    );
-  }
-});
-// ========== [/نهاية الأمر] ========== //
 
 // ========== [دوال الذكاء الاصطناعي] ========== //
 async function handleDictionaryWord(word) {
@@ -100,15 +84,16 @@ async function explainWithGemini(input) {
       return handleDictionaryWord(input);
     }
 
+    const isDialectQuery = input.includes('عتمة') || input.includes('لهجة');
+    const prompt = isDialectQuery ? 
+      `اشرح "${input}" من لهجة عتمة اليمنية باختصار` :
+      `أجب عن السؤال التالي باختصار: "${input}"`;
+
     const response = await axios.post(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${GEMINI_API_KEY}`,
       {
         contents: [{
-          parts: [{
-            text: input.includes('عتمة') || input.includes('لهجة') ?
-              `اشرح "${input}" من لهجة عتمة اليمنية باختصار` :
-              `أجب عن السؤال التالي باختصار: "${input}"`
-          }]
+          parts: [{ text: prompt }]
         }]
       },
       {
@@ -123,7 +108,6 @@ async function explainWithGemini(input) {
     return 'حدث خطأ أثناء جلب الإجابة';
   }
 }
-// ========== [/نهاية الدوال] ========== //
 
 // ========== [معالجة الرسائل] ========== //
 async function handleWord(msg, text) {
@@ -149,7 +133,6 @@ bot.on('message', async (msg) => {
   if (!msg.text || msg.text.startsWith('/')) return;
   await handleWord(msg, msg.text);
 });
-// ========== [/نهاية المعالجة] ========== //
 
 // ========== [الأوامر الأساسية] ========== //
 bot.onText(/\/start/, (msg) => {
@@ -176,7 +159,6 @@ bot.onText(/\/words/, (msg) => {
     `🔠 أمثلة على الكلمات:\n${examples || 'لا توجد كلمات بعد'}`
   );
 });
-// ========== [/نهاية الأوامر] ========== //
 
 // ========== [إعدادات الويب هوك] ========== //
 bot.setWebHook(`${WEBHOOK_URL}/webhook`, {
@@ -196,10 +178,22 @@ app.get('/', (req, res) => {
   res.json({ status: 'running', dictionary: Object.keys(dictionary).length });
 });
 
-app.listen(PORT, () => {
+// بدء الخادم مع معالجة مشكلة البورت المشغول
+const server = app.listen(PORT, () => {
   console.log(`🚀 الخادم يعمل على البورت ${PORT}`);
 });
-// ========== [/نهاية الإعدادات] ========== //
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.log(`⚠️ البورت ${PORT} مشغول، جرب بورت آخر...`);
+    const newPort = parseInt(PORT) + 1;
+    console.log(`🔄 المحاولة على البورت ${newPort}...`);
+    app.listen(newPort);
+  } else {
+    console.error('❌ خطأ في تشغيل الخادم:', err);
+    process.exit(1);
+  }
+});
 
 // معالجة الأخطاء
 process.on('unhandledRejection', (err) => {
