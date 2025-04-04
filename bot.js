@@ -5,7 +5,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 
-// تهيئة Express
+// تهيئة التطبيق
 const app = express();
 app.use(express.json());
 
@@ -21,13 +21,13 @@ if (!fs.existsSync(DICTIONARY_PATH)) {
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const ADMIN_ID = process.env.ADMIN_ID;
-const PORT = process.env.PORT || 3001; // تغيير البورت الافتراضي لتجنب التعارض
+const PORT = process.env.PORT || 3001; // تغيير البورت الافتراضي
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
-// التحقق من المتغيرات البيئية المطلوبة
+// التحقق من المتغيرات البيئية
 if (!token || !GEMINI_API_KEY || !ADMIN_ID || !WEBHOOK_URL || !WEBHOOK_SECRET) {
-  console.error('❌ يلزم تعيين جميع المتغيرات البيئية المطلوبة!');
+  console.error('❌ يلزم تعيين جميع المتغيرات البيئية!');
   process.exit(1);
 }
 
@@ -42,15 +42,13 @@ let dictionary = {};
 try {
   dictionary = JSON.parse(fs.readFileSync(DICTIONARY_PATH, 'utf-8'));
 } catch (err) {
-  console.error('❌ خطأ في قراءة ملف القاموس:', err.message);
+  console.error('❌ خطأ في قراءة القاموس:', err);
 }
 
-// ========== [أمر /addword للمسؤول فقط] ========== //
+// ========== [أمر /addword] ========== //
 bot.onText(/^\/addword (.+?):(.+)$/, async (msg, match) => {
-  const chatId = msg.chat.id;
-  
   if (msg.from.id.toString() !== ADMIN_ID) {
-    return bot.sendMessage(chatId, '⛔ هذا الأمر متاح للمسؤول فقط!');
+    return bot.sendMessage(msg.chat.id, '⛔ للمسؤول فقط!');
   }
 
   const word = match[1].trim();
@@ -58,106 +56,58 @@ bot.onText(/^\/addword (.+?):(.+)$/, async (msg, match) => {
 
   try {
     if (dictionary[word]) {
-      return bot.sendMessage(chatId, `⚠️ الكلمة "${word}" موجودة بالفعل!`);
+      return bot.sendMessage(msg.chat.id, `⚠️ الكلمة "${word}" موجودة!`);
     }
 
     dictionary[word] = explanation;
     fs.writeFileSync(DICTIONARY_PATH, JSON.stringify(dictionary, null, 2), 'utf-8');
-    
-    await bot.sendMessage(chatId, `✅ تمت إضافة الكلمة:\n${word}: ${explanation}`);
-    
+    await bot.sendMessage(msg.chat.id, `✅ تمت الإضافة:\n${word}: ${explanation}`);
   } catch (error) {
-    console.error('خطأ في إضافة الكلمة:', error);
-    await bot.sendMessage(chatId, '❌ حدث خطأ أثناء الإضافة!');
+    console.error('خطأ في الإضافة:', error);
+    await bot.sendMessage(msg.chat.id, '❌ حدث خطأ!');
   }
 });
 
-// ========== [دوال الذكاء الاصطناعي] ========== //
-async function handleDictionaryWord(word) {
-  return `📖 شرح "${word}":\n${dictionary[word]}`;
-}
-
+// ========== [الذكاء الاصطناعي] ========== //
 async function explainWithGemini(input) {
   try {
-    // إذا كانت الكلمة موجودة في القاموس نرجع شرحها
     if (dictionary[input]) {
-      return handleDictionaryWord(input);
+      return `📖 شرح "${input}":\n${dictionary[input]}`;
     }
 
-    const isDialectQuery = input.includes('عتمة') || input.includes('لهجة');
-    const prompt = isDialectQuery ? 
-      `اشرح "${input}" من لهجة عتمة اليمنية باختصار` :
-      `أجب عن السؤال التالي باختصار: "${input}"`;
+    const isDialect = input.includes('عتمة') || input.includes('لهجة');
+    const prompt = isDialect ? 
+      `اشرح "${input}" من لهجة عتمة اليمنية` : 
+      `أجب عن السؤال التالي: "${input}"`;
 
     const response = await axios.post(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        contents: [{
-          parts: [{ text: prompt }]
-        }]
-      },
-      {
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 10000
-      }
+      { contents: [{ parts: [{ text: prompt }] }] },
+      { headers: { 'Content-Type': 'application/json' }, timeout: 10000 }
     );
 
-    return response.data?.candidates?.[0]?.content?.parts?.[0]?.text || 'لا يوجد شرح متاح';
+    return response.data?.candidates?.[0]?.content?.parts?.[0]?.text || 'لا يوجد شرح';
   } catch (error) {
-    console.error('خطأ في Gemini:', error.message);
-    return 'حدث خطأ أثناء جلب الإجابة';
+    console.error('خطأ في Gemini:', error);
+    return 'حدث خطأ في جلب الإجابة';
   }
 }
 
 // ========== [معالجة الرسائل] ========== //
-async function handleWord(msg, text) {
-  const chatId = msg.chat.id;
-  const input = text.trim();
-
-  try {
-    const loadingMsg = await bot.sendMessage(chatId, '🔍 جاري البحث...');
-    const explanation = await explainWithGemini(input);
-    
-    await bot.editMessageText(explanation, {
-      chat_id: chatId,
-      message_id: loadingMsg.message_id
-    });
-
-  } catch (error) {
-    console.error('خطأ في المعالجة:', error);
-    await bot.sendMessage(chatId, '⚠️ حدث خطأ، يرجى المحاولة لاحقاً');
-  }
-}
-
 bot.on('message', async (msg) => {
   if (!msg.text || msg.text.startsWith('/')) return;
-  await handleWord(msg, msg.text);
-});
 
-// ========== [الأوامر الأساسية] ========== //
-bot.onText(/\/start/, (msg) => {
-  bot.sendMessage(msg.chat.id, 
-    'مرحباً بك في بوت قاموس لهجة عتمة اليمنية! ✨\n\n' +
-    '• اكتب أي كلمة لشرحها\n' +
-    '• /words لعرض أمثلة\n' +
-    '• /help للمساعدة'
-  );
-});
-
-bot.onText(/\/help/, (msg) => {
-  bot.sendMessage(msg.chat.id, 
-    '🛟 أوامر البوت:\n' +
-    '- اكتب أي كلمة أو سؤال للحصول على إجابة\n' +
-    '- /words: عرض أمثلة من القاموس\n' +
-    (msg.from.id.toString() === ADMIN_ID ? '- /addword كلمة:شرح: إضافة كلمة (للمسؤول)' : '')
-  );
-});
-
-bot.onText(/\/words/, (msg) => {
-  const examples = Object.keys(dictionary).slice(0, 5).join('\n- ');
-  bot.sendMessage(msg.chat.id, 
-    `🔠 أمثلة على الكلمات:\n${examples || 'لا توجد كلمات بعد'}`
-  );
+  try {
+    const loadingMsg = await bot.sendMessage(msg.chat.id, '🔍 جاري البحث...');
+    const explanation = await explainWithGemini(msg.text.trim());
+    await bot.editMessageText(explanation, {
+      chat_id: msg.chat.id,
+      message_id: loadingMsg.message_id
+    });
+  } catch (error) {
+    console.error('خطأ في المعالجة:', error);
+    await bot.sendMessage(msg.chat.id, '⚠️ حدث خطأ، حاول لاحقاً');
+  }
 });
 
 // ========== [إعدادات الويب هوك] ========== //
@@ -175,27 +125,24 @@ app.post('/webhook', (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.json({ status: 'running', dictionary: Object.keys(dictionary).length });
+  res.json({ status: 'running', version: '2.0.1' });
 });
 
-// بدء الخادم مع معالجة مشكلة البورت المشغول
+// بدء الخادم مع معالجة الأخطاء
 const server = app.listen(PORT, () => {
-  console.log(`🚀 الخادم يعمل على البورت ${PORT}`);
+  console.log(`🚀 يعمل على البورت ${PORT}`);
 });
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.log(`⚠️ البورت ${PORT} مشغول، جرب بورت آخر...`);
-    const newPort = parseInt(PORT) + 1;
-    console.log(`🔄 المحاولة على البورت ${newPort}...`);
-    app.listen(newPort);
+    console.log(`⚠️ البورت ${PORT} مشغول، جرب ${parseInt(PORT) + 1}`);
+    app.listen(parseInt(PORT) + 1);
   } else {
-    console.error('❌ خطأ في تشغيل الخادم:', err);
+    console.error('❌ خطأ في الخادم:', err);
     process.exit(1);
   }
 });
 
-// معالجة الأخطاء
 process.on('unhandledRejection', (err) => {
   console.error('⚠️ خطأ غير معالج:', err);
 });
