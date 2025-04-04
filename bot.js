@@ -23,7 +23,7 @@ if (!fs.existsSync(DICTIONARY_PATH)) {
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const ADMIN_ID = process.env.ADMIN_ID;
-const PORT = process.env.PORT || 3000; // تغيير البورت الافتراضي إلى 10000
+const PORT = process.env.PORT || 10000; // تغيير البورت الافتراضي إلى 10000
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
@@ -114,7 +114,7 @@ async function handleWord(msg, word) {
     if (dictionary[wordTrimmed]) {
       await bot.sendMessage(chatId, `📖 شرح "${wordTrimmed}":\n${dictionary[wordTrimmed]}`, {
         reply_markup: {
-          inline_keyboard: [[{ text: '⚠️ إبلاغ عن خطأ', callback_data: `report_${wordTrimmed}` }]] // أضفت قوس إغلاق هنا
+          inline_keyboard: [[{ text: '⚠️ إبلاغ عن خطأ', callback_data: `report_${wordTrimmed}` }]]
         }
       });
     } else {
@@ -132,7 +132,7 @@ async function handleWord(msg, word) {
           chat_id: chatId,
           message_id: loadingMsg.message_id,
           reply_markup: {
-            inline_keyboard: [[{ text: '⚠️ إبلاغ عن خطأ', callback_data: `report_${wordTrimmed}` }]
+            inline_keyboard: [[{ text: '⚠️ إبلاغ عن خطأ', callback_data: `report_${wordTrimmed}` }]]
           }
         });
         saveWordToDictionary(wordTrimmed, geminiExplanation, user);
@@ -237,26 +237,26 @@ app.get('/', (req, res) => {
 });
 
 // بدء الخادم مع معالجة مشكلة البورت المشغول
-const startServer = (port) => {
-  const tester = net.createServer()
-    .once('error', (err) => {
-      if (err.code === 'EADDRINUSE') {
-        console.log(`🔄 البورت ${port} مشغول، جرب ${port + 1}`);
-        startServer(port + 1);
-      }
-    })
-    .once('listening', () => {
-      tester.close(() => {
-        app.listen(port, () => {
-          console.log(`🚀 الخادم يعمل على البورت ${port}`);
-          console.log(`🔗 رابط الويب هوك: ${WEBHOOK_URL}/webhook`);
-        });
-      });
-    })
-    .listen(port);
+const startServer = () => {
+  const server = app.listen(PORT, () => {
+    console.log(`🚀 الخادم يعمل على البورت ${PORT}`);
+    console.log(`🔗 رابط الويب هوك: ${WEBHOOK_URL}/webhook`);
+  });
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.log(`⚠️ البورت ${PORT} مشغول، جرب بورت آخر...`);
+      const newPort = parseInt(PORT) + 1;
+      console.log(`🔄 المحاولة على البورت ${newPort}...`);
+      app.listen(newPort);
+    } else {
+      console.error('❌ خطأ في تشغيل الخادم:', err);
+      process.exit(1);
+    }
+  });
 };
 
-startServer(PORT);
+startServer();
 
 // معالجة الأخطاء غير الملتقطة
 process.on('unhandledRejection', (error) => {
