@@ -21,7 +21,7 @@ if (!fs.existsSync(DICTIONARY_PATH)) {
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const ADMIN_ID = process.env.ADMIN_ID;
-const PORT = process.env.PORT || 0; // 0 يعني أي بورت متاح
+const PORT = process.env.PORT || 3001; // تغيير البورت الافتراضي
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
@@ -33,8 +33,7 @@ if (!token || !GEMINI_API_KEY || !ADMIN_ID || !WEBHOOK_URL || !WEBHOOK_SECRET) {
 
 // إنشاء البوت
 const bot = new TelegramBot(token, {
-  webHook: { port: PORT },
-  onlyFirstMatch: true
+  polling: false // تعطيل البولينج لأننا نستخدم ويب هوك
 });
 
 // تحميل القاموس
@@ -110,22 +109,27 @@ bot.on('message', async (msg) => {
   }
 });
 
-// ========== [إعدادات الويب هوك] ========== //
-const startServer = () => {
-  const server = app.listen(PORT, () => {
-    const actualPort = server.address().port;
-    console.log(`🚀 يعمل على البورت ${actualPort}`);
+// ========== [إعدادات الخادم] ========== //
+const startServer = (port) => {
+  const server = app.listen(port, () => {
+    console.log(`🚀 يعمل على البورت ${port}`);
     
-    // تفعيل الويب هوك بعد معرفة البورت الفعلي
+    // تفعيل الويب هوك بعد نجاح تشغيل الخادم
     bot.setWebHook(`${WEBHOOK_URL}/webhook`, {
       secret_token: WEBHOOK_SECRET,
       allowed_updates: ['message']
-    }).then(() => console.log('✅ تم تفعيل الويب هوك'));
+    }).then(() => console.log('✅ تم تفعيل الويب هوك'))
+    .catch(err => console.error('❌ فشل تفعيل الويب هوك:', err));
   });
 
   server.on('error', (err) => {
-    console.error('❌ خطأ في الخادم:', err);
-    process.exit(1);
+    if (err.code === 'EADDRINUSE') {
+      console.log(`⚠️ البورت ${port} مشغول، جرب البورت ${parseInt(port) + 1}`);
+      startServer(parseInt(port) + 1);
+    } else {
+      console.error('❌ خطأ في الخادم:', err);
+      process.exit(1);
+    }
   });
 };
 
@@ -138,11 +142,11 @@ app.post('/webhook', (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.json({ status: 'running', version: '2.0.2' });
+  res.json({ status: 'running', version: '2.0.3' });
 });
 
 // بدء الخادم
-startServer();
+startServer(PORT);
 
 // معالجة الأخطاء غير الملتقطة
 process.on('unhandledRejection', (err) => {
