@@ -2,7 +2,12 @@ require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
 const fs = require('fs');
+const DICTIONARY_PATH = './dictionary.json';
 
+// التأكد من وجود ملف dictionary.json
+if (!fs.existsSync(DICTIONARY_PATH)) {
+  fs.writeFileSync(DICTIONARY_PATH, JSON.stringify({}, null, 2), 'utf-8');
+}
 // تحميل المتغيرات
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
