@@ -21,7 +21,7 @@ if (!fs.existsSync(DICTIONARY_PATH)) {
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const ADMIN_ID = process.env.ADMIN_ID;
-const PORT = process.env.PORT || 3001; // تغيير البورت الافتراضي
+const PORT = process.env.PORT || 3001;
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
@@ -128,21 +128,23 @@ app.get('/', (req, res) => {
   res.json({ status: 'running', version: '2.0.1' });
 });
 
-// بدء الخادم مع معالجة الأخطاء
+// بدء الخادم
 const server = app.listen(PORT, () => {
   console.log(`🚀 يعمل على البورت ${PORT}`);
 });
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.log(`⚠️ البورت ${PORT} مشغول، جرب ${parseInt(PORT) + 1}`);
-    app.listen(parseInt(PORT) + 1);
+    const newPort = parseInt(PORT) + 1;
+    console.log(`⚠️ البورت ${PORT} مشغول، جرب ${newPort}`);
+    app.listen(newPort);
   } else {
     console.error('❌ خطأ في الخادم:', err);
     process.exit(1);
   }
 });
 
+// معالجة الأخطاء غير الملتقطة
 process.on('unhandledRejection', (err) => {
   console.error('⚠️ خطأ غير معالج:', err);
 });
