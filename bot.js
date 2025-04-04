@@ -5,8 +5,21 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 
+console.log('=== إعدادات البوت ===');
+console.log({
+  token: process.env.TELEGRAM_BOT_TOKEN ? '✔ موجود' : '❌ مفقود',
+  webhookUrl: process.env.WEBHOOK_URL,
+  port: process.env.PORT || 3001
+});
+
 // تهيئة التطبيق
 const app = express();
+
+app.use((req, res, next) => {
+  console.log(`📩 ${req.method} ${req.path}`, req.headers);
+  next();
+});
+
 app.use(express.json());
 
 // مسار ملف القاموس
@@ -65,12 +78,9 @@ bot.onText(/^\/addword (.+?):(.+)$/, async (msg, match) => {
     dictionary[word] = explanation;
     fs.writeFileSync(DICTIONARY_PATH, JSON.stringify(dictionary, null, 2), 'utf-8');
     await bot.sendMessage(msg.chat.id, `✅ تمت الإضافة:\n${word}: ${explanation}`);
-    
-    // إرسال تنبيه للمشرف
-    await bot.sendMessage(ADMIN_ID, `تمت إضافة كلمة جديدة: ${word}`);
   } catch (error) {
     console.error('خطأ في الإضافة:', error);
-    await bot.sendMessage(msg.chat.id, '❌ حدث خطأ أثناء الإضافة!');
+    await bot.sendMessage(msg.chat.id, '❌ حدث خطأ!');
   }
 });
 
@@ -101,14 +111,13 @@ async function explainWithGemini(input) {
 
 // ========== [معالجة الرسائل] ========== //
 bot.on('message', async (msg) => {
-  console.log('📥 رسالة واردة:', msg.text); // للتتبع
+  console.log('📥 رسالة واردة:', msg.text);
   
   if (!msg.text || msg.text.startsWith('/')) return;
 
   try {
     const loadingMsg = await bot.sendMessage(msg.chat.id, '🔍 جاري البحث...');
     const explanation = await explainWithGemini(msg.text.trim());
-    
     await bot.editMessageText(explanation, {
       chat_id: msg.chat.id,
       message_id: loadingMsg.message_id
@@ -160,7 +169,7 @@ const startServer = () => {
 
 // ========== [مسارات API] ========== //
 app.post('/webhook', (req, res) => {
-  console.log('📩 طلب وارد:', req.body); // تسجيل الطلبات
+  console.log('📩 طلب وارد:', req.body);
   
   if (req.headers['x-telegram-bot-api-secret-token'] !== WEBHOOK_SECRET) {
     console.warn('⛔ محاولة وصول غير مصرح بها');
