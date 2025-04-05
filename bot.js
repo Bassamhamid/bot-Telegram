@@ -98,7 +98,7 @@ bot.onText(/^\/start$/, (msg) => {
 مرحباً! 👋
 أنا بوت متخصص في شرح مفردات لهجة عتمة اليمنية.
 
-✍️ أرسل أي كلمة أو اسأل عنها وسأشرحها لك
+✍️ أرسل "اشرح كلمة [الكلمة]" وسأشرح لك معنى الكلمة
 📚 /words - لعرض الكلمات المخزنة
 ➕ /addword [الكلمة]:[الشرح] - لإضافة كلمة جديدة (المشرف فقط)
   `.trim());
@@ -143,38 +143,25 @@ bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
 
   // محاولة استخراج الكلمة من الجملة
-  let wordToCheck = text;
-  const patterns = [
-    /(?:ما معنى|وش معنى|اشرح|يعني ايش|تعني ايش)\s+كلمة?\s*([\u0600-\u06FF]+)/i,
-    /^([\u0600-\u06FF]+)$/i
-  ];
+  const pattern = /اشرح\s+كلمة\s+([\u0600-\u06FF]+)/i;
+  const match = text.match(pattern);
 
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) {
-      wordToCheck = match[1].trim();
-      break;
-    }
-  }
+  if (match && match[1]) {
+    const wordToExplain = match[1].trim();
 
-  try {
-    // إذا موجودة في القاموس، أرسلها أولاً
-    if (dictionary[wordToCheck]) {
-      await bot.sendMessage(chatId, `📖 "${wordToCheck}":\n${dictionary[wordToCheck]}`);
+    // إذا كانت الكلمة موجودة في القاموس، اعرض الشرح
+    if (dictionary[wordToExplain]) {
+      return bot.sendMessage(chatId, `📖 "${wordToExplain}":\n${dictionary[wordToExplain]}`);
     }
 
-    // دائماً اطلب شرح من Gemini
+    // إذا لم تكن موجودة في القاموس، استخدم الذكاء الاصطناعي
     const loadingMsg = await bot.sendMessage(chatId, '🔍 جاري البحث عن الشرح...');
-    const explanation = await explainWithGemini(wordToCheck);
+    const explanation = await explainWithGemini(wordToExplain);
 
     await bot.editMessageText(explanation, {
       chat_id: chatId,
       message_id: loadingMsg.message_id
     });
-
-  } catch (error) {
-    console.error('❌ خطأ في معالجة الرسالة:', error);
-    bot.sendMessage(chatId, '⚠️ حدث خطأ غير متوقع. يرجى المحاولة لاحقاً.');
   }
 });
 
