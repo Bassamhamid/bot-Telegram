@@ -1,23 +1,26 @@
-// Telegram bot for Yemeni dialect explanation using Gemini API require('dotenv').config(); const express = require('express'); const TelegramBot = require('node-telegram-bot-api'); const axios = require('axios'); const fs = require('fs'); const path = require('path');
+// telegram-dictionary-bot require('dotenv').config(); const express = require('express'); const TelegramBot = require('node-telegram-bot-api'); const axios = require('axios'); const fs = require('fs'); const path = require('path');
 
-// Load and validate environment variables const { TELEGRAM_BOT_TOKEN, GEMINI_API_KEY, WEBHOOK_URL, WEBHOOK_SECRET } = process.env;
+const { TELEGRAM_BOT_TOKEN, GEMINI_API_KEY, WEBHOOK_URL, WEBHOOK_SECRET } = process.env;
 
-if (!TELEGRAM_BOT_TOKEN || !GEMINI_API_KEY || !WEBHOOK_URL || !WEBHOOK_SECRET) { console.error('❌ أحد المتغيرات البيئية مفقود.'); process.exit(1); }
+const DICTIONARY_PATH = path.join(__dirname, 'dictionary.json'); let dictionary = {}; try { if (fs.existsSync(DICTIONARY_PATH)) { dictionary = JSON.parse(fs.readFileSync(DICTIONARY_PATH)); console.log(تم تحميل القاموس (${Object.keys(dictionary).length} كلمة)); } else { fs.writeFileSync(DICTIONARY_PATH, JSON.stringify({}, null, 2)); console.log('تم إنشاء ملف قاموس جديد'); } } catch (err) { console.error('خطأ في قراءة القاموس:', err); }
 
-const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false }); const app = express();
+const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { webHook: { port: process.env.PORT || 3000 } }); bot.setWebHook(${WEBHOOK_URL}/webhook, { secret_token: WEBHOOK_SECRET }); const app = express(); app.use(express.json());
 
-app.use(express.json());
+function findPhraseInDictionary(message) { const lowerMsg = message.toLowerCase(); for (const [key, meaning] of Object.entries(dictionary)) { if (lowerMsg.includes(key.toLowerCase())) { return { word: key, meaning }; } } return null; }
 
-// Load dictionary const DICTIONARY_PATH = path.join(__dirname, 'dictionary.json'); let dictionary = {};
+async function explainWithGemini(text) { const url = 'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro-latest:generateContent'; const prompt = اشرح الكلمة أو العبارة التالية باللهجة اليمنية: ${text}; try { const response = await axios.post(${url}?key=${GEMINI_API_KEY}, { contents: [{ parts: [{ text: prompt }] }] }); const reply = response.data.candidates?.[0]?.content?.parts?.[0]?.text; return reply || 'لم أستطع شرح هذه الكلمة حالياً.'; } catch (error) { console.error('خطأ في استدعاء Gemini:', error); return 'حدث خطأ أثناء شرح الكلمة.'; } }
 
-try { if (fs.existsSync(DICTIONARY_PATH)) { dictionary = JSON.parse(fs.readFileSync(DICTIONARY_PATH)); console.log(📚 تم تحميل القاموس (${Object.keys(dictionary).length} كلمة)); } else { fs.writeFileSync(DICTIONARY_PATH, JSON.stringify({}, null, 2)); console.log('📝 تم إنشاء ملف قاموس جديد'); } } catch (err) { console.error('❌ خطأ في قراءة القاموس:', err); }
+bot.onText(//start/, (msg) => { bot.sendMessage(msg.chat.id, 'مرحباً! أرسل لي أي كلمة أو عبارة باللهجة العتمية وسأشرحها لك.'); });
 
-// Use Gemini to explain a word async function explainWithGemini(text, knownMeaning) { const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent';
+bot.onText(//words/, (msg) => { const words = Object.keys(dictionary); if (words.length === 0) { bot.sendMessage(msg.chat.id, 'القاموس فارغ حالياً.'); } else { bot.sendMessage(msg.chat.id, الكلمات المتوفرة: ${words.join(', ')}); } });
 
-const prompt = knownMeaning ? اشرح معنى العبارة أو الكلمة التالية في لهجة عتمة اليمنية: "${text}". حسب القاموس، معناها: "${knownMeaning}". استخدم هذه المعلومة إن كانت دقيقة. : اشرح معنى العبارة أو الكلمة التالية في لهجة عتمة اليمنية: "${text}". إذا لم تكن معروفة، قل أنها غير معروفة.;
+bot.on('message', async (msg) => { const chatId = msg.chat.id; const text = msg.text?.trim(); if (!text || text.startsWith('/')) return;
 
-try { const response = await axios.post( API_URL, { contents: [{ parts: [{ text: prompt }] }] }, { params: { key: GEMINI_API_KEY }, headers: { 'Content-Type': 'application/json' }, timeout: 10000 } );
+const found = findPhraseInDictionary(text); if (found) { bot.sendMessage(chatId, شرح "${found.word}": ${found.meaning}); } else { const explanation = await explainWithGemini(text); bot.sendMessage(chatId, explanation); } });
 
-return response.data?.candidates?.[0]?.content?.parts?.[0]?.text || '❌ لم أتمكن من العثور على شرح مناسب';
+app.post('/webhook', (req, res) => { if (req.headers['x-telegram-bot-api-secret-token'] === WEBHOOK_SECRET) { bot.processUpdate(req.body); res.sendStatus(200); } else { res.sendStatus(403); } });
 
-} catch (error) {
+app.get('/', (_, res) => res.send('البوت يعمل حالياً'));
+
+process.on('unhandledRejection', (err) => { console.error('Unhandled rejection:', err); });
+
