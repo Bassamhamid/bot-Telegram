@@ -50,14 +50,20 @@ try {
 async function explainWithGemini(text) {
   const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent';
 
+  // إذا الكلمة موجودة في القاموس، نرسل الشرح معها لتأكيدها
+  let prompt = `اشرح معنى كلمة "${text}" في لهجة عتمة اليمنية بشكل دقيق.`;
+  if (dictionary[text]) {
+    prompt += ` حسب قاموس محلي، الكلمة تعني: "${dictionary[text]}". استخدم هذه المعلومة كمرجع إذا كانت دقيقة.`;
+  } else {
+    prompt += ` إذا لم تكن معروفة، قل أنها غير معروفة.`;
+  }
+
   try {
     const response = await axios.post(
       API_URL,
       {
         contents: [{
-          parts: [{
-            text: `اشرح معنى كلمة "${text}" في لهجة عتمة اليمنية بشكل دقيق. إذا كانت الكلمة غير موجودة، قل أنها غير معروفة.`
-          }]
+          parts: [{ text: prompt }]
         }]
       },
       {
