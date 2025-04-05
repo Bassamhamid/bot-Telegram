@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const express = require('express'); // للسيرفر
 const TelegramBot = require('node-telegram-bot-api');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 require('dotenv').config();
@@ -8,7 +9,7 @@ const token = process.env.TELEGRAM_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+const model = genAI.getGenerativeModel({ model: "models/gemini-pro" });
 
 const DICTIONARY_PATH = path.join(__dirname, 'dictionary.json');
 let dictionary = {};
@@ -25,17 +26,14 @@ try {
   console.error('❌ خطأ في قراءة القاموس:', err);
 }
 
-// دالة للبحث الذكي في القاموس (بما في ذلك العبارات)
 function findPhraseInDictionary(text) {
   const normalizedText = text.trim().toLowerCase();
   const dictKeys = Object.keys(dictionary);
 
-  // تطابق مباشر
   if (dictionary[normalizedText]) {
     return dictionary[normalizedText];
   }
 
-  // تطابق عبارات كاملة من القاموس داخل الجملة
   for (const phrase of dictKeys) {
     if (normalizedText.includes(phrase)) {
       return dictionary[phrase];
@@ -45,7 +43,6 @@ function findPhraseInDictionary(text) {
   return null;
 }
 
-// الرد على الرسائل النصية
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text?.trim().toLowerCase();
@@ -58,10 +55,11 @@ bot.on('message', async (msg) => {
     return;
   }
 
-  // إذا لم توجد الكلمة في القاموس، استخدم Gemini
   try {
     const prompt = `اشرح معنى العبارة باللهجة اليمنية العتمية "${text}" بالعربية الفصحى.`;
-    const result = await model.generateContent(prompt);
+    const result = await model.generateContent({
+      contents: [{ parts: [{ text: prompt }] }]
+    });
     const response = result.response.text().trim();
     bot.sendMessage(chatId, `🤖 الذكاء الاصطناعي:\n${response}`);
   } catch (error) {
@@ -69,3 +67,9 @@ bot.on('message', async (msg) => {
     bot.sendMessage(chatId, "❌ حدث خطأ أثناء محاولة الفهم. حاول مرة أخرى لاحقًا.");
   }
 });
+
+// لإبقاء البوت فعالًا على Render Web Service:
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.get('/', (req, res) => res.send('Bot is running.'));
+app.listen(PORT, () => console.log(`🚀 Web service running on port ${PORT}`));
