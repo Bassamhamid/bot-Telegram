@@ -58,7 +58,12 @@ bot.on('message', async (msg) => {
   try {
     const prompt = `اشرح معنى العبارة باللهجة اليمنية العتمية "${text}" بالعربية الفصحى.`;
     const result = await model.generateContent({
-      contents: [{ parts: [{ text: prompt }] }]
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: prompt }]
+        }
+      ]
     });
     const response = result.response.text().trim();
     bot.sendMessage(chatId, `🤖 الذكاء الاصطناعي:\n${response}`);
