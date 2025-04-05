@@ -8,21 +8,20 @@ require('dotenv').config();
 
 // إعداد التوكن والدومين
 const token = process.env.TELEGRAM_TOKEN;
-const renderUrl = process.env.RENDER_URL; // مثال: https://your-app.onrender.com
+const renderUrl = process.env.RENDER_URL;
 
-// إنشاء البوت باستخدام Webhook
-const bot = new TelegramBot(token, { webHook: { port: process.env.PORT || 3000 } });
 const app = express();
 app.use(bodyParser.json());
 
-// إعداد Webhook
+// إنشاء البوت بدون تحديد بورت
+const bot = new TelegramBot(token);
 bot.setWebHook(`${renderUrl}/bot${token}`);
 
-// استدعاء Gemini
+// إعداد Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-pro" }); // بدون "models/"
+const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
-// تحميل القاموس من ملف JSON
+// تحميل القاموس
 const DICTIONARY_PATH = path.join(__dirname, 'dictionary.json');
 let dictionary = {};
 
@@ -38,32 +37,22 @@ try {
   console.error('❌ خطأ في قراءة القاموس:', err);
 }
 
-// دالة البحث في القاموس
 function findPhraseInDictionary(text) {
   const normalizedText = text.trim().toLowerCase();
   const dictKeys = Object.keys(dictionary);
-
-  if (dictionary[normalizedText]) {
-    return dictionary[normalizedText];
-  }
-
+  if (dictionary[normalizedText]) return dictionary[normalizedText];
   for (const phrase of dictKeys) {
-    if (normalizedText.includes(phrase)) {
-      return dictionary[phrase];
-    }
+    if (normalizedText.includes(phrase)) return dictionary[phrase];
   }
-
   return null;
 }
 
-// استلام الرسائل
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text?.trim().toLowerCase();
   if (!text) return;
 
   const meaning = findPhraseInDictionary(text);
-
   if (meaning) {
     bot.sendMessage(chatId, `📚 المعنى من القاموس:\n${meaning}`);
     return;
@@ -82,15 +71,17 @@ bot.on('message', async (msg) => {
   }
 });
 
-// استقبال طلبات Webhook من Telegram
+// استقبال Webhook
 app.post(`/bot${token}`, (req, res) => {
   bot.processUpdate(req.body);
   res.sendStatus(200);
 });
 
-// صفحة بسيطة للتأكد من أن السيرفر يعمل
+// صفحة رئيسية للتأكد
 app.get('/', (req, res) => res.send('Bot is running via Webhook'));
 
-app.listen(process.env.PORT || 3000, () => {
-  console.log('🚀 Webhook server running on Render');
+// تشغيل السيرفر
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 Webhook server running on port ${PORT}`);
 });
