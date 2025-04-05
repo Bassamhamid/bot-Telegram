@@ -50,7 +50,7 @@ try {
 
 // دالة Gemini المعدلة
 async function explainWithGemini(text) {
-  const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
+  const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent';
   
   try {
     console.log(`🔍 البحث عن شرح لكلمة: ${text}`);
@@ -59,13 +59,13 @@ async function explainWithGemini(text) {
       {
         contents: [{
           parts: [{
-            text: `اشرح معنى كلمة "${text}" في لهجة عتمة اليمنية بشكل دقيق`
+            text: `اشرح معنى كلمة "${text}" في لهجة عتمة اليمنية بشكل دقيق. إذا كانت الكلمة غير موجودة، قل أنها غير معروفة.`
           }]
         }]
       },
       {
         params: { key: process.env.GEMINI_API_KEY },
-        timeout: 10000, // مهلة 10 ثواني
+        timeout: 10000,
         headers: {
           'Content-Type': 'application/json',
           'x-goog-api-key': process.env.GEMINI_API_KEY
@@ -81,7 +81,12 @@ async function explainWithGemini(text) {
       message: error.message,
       data: error.response?.data
     });
-    return '⚠️ عذراً، حدث خطأ أثناء محاولة الشرح. يرجى المحاولة لاحقاً.';
+    
+    // معالجة خاصة لخطأ 404
+    if (error.response?.status === 404) {
+      return '⚠️ خدمة الشرح غير متاحة حالياً. جرب لاحقاً.';
+    }
+    return '⚠️ حدث خطأ أثناء محاولة الشرح. يرجى المحاولة لاحقاً.';
   }
 }
 
