@@ -1,15 +1,17 @@
 const fs = require('fs');
 const path = require('path');
-const express = require('express'); // للسيرفر
+const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 require('dotenv').config();
 
-const token = process.env.TELEGRAM_TOKEN;
-const bot = new TelegramBot(token, { polling: true });
+const app = express();
+app.use(express.json());
 
+const token = process.env.TELEGRAM_TOKEN;
+const bot = new TelegramBot(token);
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "models/gemini-pro" });
+const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
 const DICTIONARY_PATH = path.join(__dirname, 'dictionary.json');
 let dictionary = {};
@@ -43,13 +45,13 @@ function findPhraseInDictionary(text) {
   return null;
 }
 
+// التعامل مع الرسائل الواردة
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text?.trim().toLowerCase();
   if (!text) return;
 
   const meaning = findPhraseInDictionary(text);
-
   if (meaning) {
     bot.sendMessage(chatId, `📚 المعنى من القاموس:\n${meaning}`);
     return;
@@ -58,12 +60,7 @@ bot.on('message', async (msg) => {
   try {
     const prompt = `اشرح معنى العبارة باللهجة اليمنية العتمية "${text}" بالعربية الفصحى.`;
     const result = await model.generateContent({
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: prompt }]
-        }
-      ]
+      contents: [{ parts: [{ text: prompt }] }]
     });
     const response = result.response.text().trim();
     bot.sendMessage(chatId, `🤖 الذكاء الاصطناعي:\n${response}`);
@@ -73,8 +70,24 @@ bot.on('message', async (msg) => {
   }
 });
 
-// لإبقاء البوت فعالًا على Render Web Service:
-const app = express();
+// إعداد Webhook
+const WEBHOOK_URL = process.env.WEBHOOK_URL;
 const PORT = process.env.PORT || 3000;
+
+app.post(`/bot${token}`, (req, res) => {
+  bot.processUpdate(req.body);
+  res.sendStatus(200);
+});
+
+// تشغيل السيرفر
 app.get('/', (req, res) => res.send('Bot is running.'));
-app.listen(PORT, () => console.log(`🚀 Web service running on port ${PORT}`));
+app.listen(PORT, async () => {
+  console.log(`🚀 Web service running on port ${PORT}`);
+
+  try {
+    await bot.setWebHook(`${WEBHOOK_URL}/bot${token}`);
+    console.log('✅ Webhook set successfully!');
+  } catch (err) {
+    console.error('❌ خطأ في إعداد Webhook:', err.message);
+  }
+});
