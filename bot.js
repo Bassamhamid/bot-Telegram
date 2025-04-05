@@ -21,6 +21,9 @@ for (const [name, value] of Object.entries(requiredVars)) {
   }
 }
 
+// تحويل ADMIN_ID إلى رقم
+const adminId = parseInt(process.env.ADMIN_ID, 10);
+
 // إعداد البوت والتطبيق
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: false });
 const app = express();
@@ -74,15 +77,14 @@ async function explainWithGemini(text) {
     );
 
     const result = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    return result || '❌ لم أتمكن من العثور على شرح مناسب';
+    return result || '❌ لم أتمكن من العثور على شرح مناسب.';
   } catch (error) {
     console.error('💥 خطأ في Gemini API:', {
       status: error.response?.status,
       message: error.message,
       data: error.response?.data
     });
-    
-    // معالجة خاصة لخطأ 404
+
     if (error.response?.status === 404) {
       return '⚠️ خدمة الشرح غير متاحة حالياً. جرب لاحقاً.';
     }
@@ -90,7 +92,8 @@ async function explainWithGemini(text) {
   }
 }
 
-// الأوامر الأساسية
+// أوامر البوت
+
 bot.onText(/^\/start$/, (msg) => {
   bot.sendMessage(msg.chat.id, `
 مرحباً! 👋
@@ -98,6 +101,7 @@ bot.onText(/^\/start$/, (msg) => {
 
 ✍️ أرسل أي كلمة وسأحاول شرحها
 📚 /words - لعرض الكلمات المخزنة
+🛠️ /addword كلمة = شرح (للمشرف فقط)
   `.trim());
 });
 
@@ -105,25 +109,55 @@ bot.onText(/^\/words$/, (msg) => {
   const words = Object.keys(dictionary);
   bot.sendMessage(
     msg.chat.id,
-    words.length ? `📖 الكلمات المخزنة:\n\n${words.join('\n')}` : '📭 لا توجد كلمات مسجلة بعد'
+    words.length
+      ? `📖 الكلمات المخزنة:\n\n${words.join('\n')}`
+      : '📭 لا توجد كلمات مسجلة بعد.'
   );
 });
 
-// معالجة الرسائل
+// أمر إضافة كلمة (للمشرف فقط)
+bot.onText(/^\/addword (.+)$/, (msg, match) => {
+  const userId = msg.from.id;
+  const chatId = msg.chat.id;
+
+  if (userId !== adminId) {
+    return bot.sendMessage(chatId, '⛔ هذا الأمر مخصص للمشرف فقط.');
+  }
+
+  const input = match[1].trim();
+  const [word, ...definitionParts] = input.split('=');
+  const wordClean = word.trim();
+  const definition = definitionParts.join('=').trim();
+
+  if (!wordClean || !definition) {
+    return bot.sendMessage(chatId, '❗️صيغة الأمر غير صحيحة.\nاستخدم:\n`/addword كلمة = شرح`', { parse_mode: 'Markdown' });
+  }
+
+  if (dictionary[wordClean]) {
+    return bot.sendMessage(chatId, `⚠️ الكلمة "${wordClean}" موجودة مسبقاً في القاموس.`);
+  }
+
+  dictionary[wordClean] = definition;
+  fs.writeFileSync(DICTIONARY_PATH, JSON.stringify(dictionary, null, 2));
+
+  bot.sendMessage(chatId, `✅ تمت إضافة الكلمة *${wordClean}* إلى القاموس.`, { parse_mode: 'Markdown' });
+});
+
+// الرسائل العادية
 bot.on('message', async (msg) => {
   const text = msg.text?.trim();
   if (!text || text.startsWith('/')) return;
 
   try {
     const chatId = msg.chat.id;
-    
+
     if (dictionary[text]) {
-      return bot.sendMessage(chatId, `📖 "${text}":\n${dictionary[text]}`);
+      return bot.sendMessage(chatId, `📖 *${text}*:\n${dictionary[text]}`, { parse_mode: 'Markdown' });
     }
 
     const loadingMsg = await bot.sendMessage(chatId, '🔍 جاري البحث عن الشرح...');
     const explanation = await explainWithGemini(text);
-    
+
     await bot.editMessageText(explanation, {
       chat_id: chatId,
       message_id: loadingMsg.message_id
@@ -147,7 +181,7 @@ app.post('/webhook', (req, res) => {
     res.sendStatus(200);
   } catch (error) {
     console.error('💥 خطأ في معالجة التحديث:', error);
-    res.sendStatus(200); // إرجاع 200 لتجنب إعادة المحاولة
+    res.sendStatus(200); // لمنع Telegram من إعادة المحاولة
   }
 });
 
