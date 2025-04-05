@@ -1,26 +1,71 @@
-// telegram-dictionary-bot require('dotenv').config(); const express = require('express'); const TelegramBot = require('node-telegram-bot-api'); const axios = require('axios'); const fs = require('fs'); const path = require('path');
+const fs = require('fs');
+const path = require('path');
+const TelegramBot = require('node-telegram-bot-api');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+require('dotenv').config();
 
-const { TELEGRAM_BOT_TOKEN, GEMINI_API_KEY, WEBHOOK_URL, WEBHOOK_SECRET } = process.env;
+const token = process.env.TELEGRAM_TOKEN;
+const bot = new TelegramBot(token, { polling: true });
 
-const DICTIONARY_PATH = path.join(__dirname, 'dictionary.json'); let dictionary = {}; try { if (fs.existsSync(DICTIONARY_PATH)) { dictionary = JSON.parse(fs.readFileSync(DICTIONARY_PATH)); console.log(تم تحميل القاموس (${Object.keys(dictionary).length} كلمة)); } else { fs.writeFileSync(DICTIONARY_PATH, JSON.stringify({}, null, 2)); console.log('تم إنشاء ملف قاموس جديد'); } } catch (err) { console.error('خطأ في قراءة القاموس:', err); }
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
-const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { webHook: { port: process.env.PORT || 3000 } }); bot.setWebHook(${WEBHOOK_URL}/webhook, { secret_token: WEBHOOK_SECRET }); const app = express(); app.use(express.json());
+const DICTIONARY_PATH = path.join(__dirname, 'dictionary.json');
+let dictionary = {};
 
-function findPhraseInDictionary(message) { const lowerMsg = message.toLowerCase(); for (const [key, meaning] of Object.entries(dictionary)) { if (lowerMsg.includes(key.toLowerCase())) { return { word: key, meaning }; } } return null; }
+try {
+  if (fs.existsSync(DICTIONARY_PATH)) {
+    dictionary = JSON.parse(fs.readFileSync(DICTIONARY_PATH));
+    console.log(`📚 تم تحميل القاموس (${Object.keys(dictionary).length} كلمة)`);
+  } else {
+    fs.writeFileSync(DICTIONARY_PATH, JSON.stringify({}, null, 2));
+    console.log('📝 تم إنشاء ملف قاموس جديد');
+  }
+} catch (err) {
+  console.error('❌ خطأ في قراءة القاموس:', err);
+}
 
-async function explainWithGemini(text) { const url = 'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro-latest:generateContent'; const prompt = اشرح الكلمة أو العبارة التالية باللهجة اليمنية: ${text}; try { const response = await axios.post(${url}?key=${GEMINI_API_KEY}, { contents: [{ parts: [{ text: prompt }] }] }); const reply = response.data.candidates?.[0]?.content?.parts?.[0]?.text; return reply || 'لم أستطع شرح هذه الكلمة حالياً.'; } catch (error) { console.error('خطأ في استدعاء Gemini:', error); return 'حدث خطأ أثناء شرح الكلمة.'; } }
+// دالة للبحث الذكي في القاموس (بما في ذلك العبارات)
+function findPhraseInDictionary(text) {
+  const normalizedText = text.trim().toLowerCase();
+  const dictKeys = Object.keys(dictionary);
 
-bot.onText(//start/, (msg) => { bot.sendMessage(msg.chat.id, 'مرحباً! أرسل لي أي كلمة أو عبارة باللهجة العتمية وسأشرحها لك.'); });
+  // تطابق مباشر
+  if (dictionary[normalizedText]) {
+    return dictionary[normalizedText];
+  }
 
-bot.onText(//words/, (msg) => { const words = Object.keys(dictionary); if (words.length === 0) { bot.sendMessage(msg.chat.id, 'القاموس فارغ حالياً.'); } else { bot.sendMessage(msg.chat.id, الكلمات المتوفرة: ${words.join(', ')}); } });
+  // تطابق عبارات كاملة من القاموس داخل الجملة
+  for (const phrase of dictKeys) {
+    if (normalizedText.includes(phrase)) {
+      return dictionary[phrase];
+    }
+  }
 
-bot.on('message', async (msg) => { const chatId = msg.chat.id; const text = msg.text?.trim(); if (!text || text.startsWith('/')) return;
+  return null;
+}
 
-const found = findPhraseInDictionary(text); if (found) { bot.sendMessage(chatId, شرح "${found.word}": ${found.meaning}); } else { const explanation = await explainWithGemini(text); bot.sendMessage(chatId, explanation); } });
+// الرد على الرسائل النصية
+bot.on('message', async (msg) => {
+  const chatId = msg.chat.id;
+  const text = msg.text?.trim().toLowerCase();
+  if (!text) return;
 
-app.post('/webhook', (req, res) => { if (req.headers['x-telegram-bot-api-secret-token'] === WEBHOOK_SECRET) { bot.processUpdate(req.body); res.sendStatus(200); } else { res.sendStatus(403); } });
+  const meaning = findPhraseInDictionary(text);
 
-app.get('/', (_, res) => res.send('البوت يعمل حالياً'));
+  if (meaning) {
+    bot.sendMessage(chatId, `📚 المعنى من القاموس:\n${meaning}`);
+    return;
+  }
 
-process.on('unhandledRejection', (err) => { console.error('Unhandled rejection:', err); });
-
+  // إذا لم توجد الكلمة في القاموس، استخدم Gemini
+  try {
+    const prompt = `اشرح معنى العبارة باللهجة اليمنية العتمية "${text}" بالعربية الفصحى.`;
+    const result = await model.generateContent(prompt);
+    const response = result.response.text().trim();
+    bot.sendMessage(chatId, `🤖 الذكاء الاصطناعي:\n${response}`);
+  } catch (error) {
+    console.error("خطأ في استدعاء Gemini:", error);
+    bot.sendMessage(chatId, "❌ حدث خطأ أثناء محاولة الفهم. حاول مرة أخرى لاحقًا.");
+  }
+});
