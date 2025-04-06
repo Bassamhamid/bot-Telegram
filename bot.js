@@ -1,8 +1,11 @@
-require('dotenv').config();
+const fs = require('fs');
+if (fs.existsSync('.env')) {
+  require('dotenv').config();
+}
+
 const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
-const fs = require('fs');
 const path = require('path');
 
 // تحقق من المتغيرات البيئية
@@ -49,7 +52,6 @@ try {
 async function explainWithGemini(text) {
   const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent';
 
-  // البحث عن أي كلمات من القاموس في النص
   const foundWords = {};
   Object.keys(dictionary).forEach(word => {
     if (text.includes(word)) {
@@ -58,7 +60,7 @@ async function explainWithGemini(text) {
   });
 
   let prompt = `اشرح معنى "${text}" في لهجة عتمة اليمنية بشكل دقيق.`;
-  
+
   if (Object.keys(foundWords).length > 0) {
     prompt += `\n\nحسب قاموس محلي، تحتوي العبارة على الكلمات التالية:\n`;
     for (const [word, meaning] of Object.entries(foundWords)) {
@@ -128,13 +130,11 @@ bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
 
   try {
-    // التحقق أولاً من وجود الكلمة أو العبارة في القاموس
     const directMatch = dictionary[text];
     if (directMatch) {
       return await bot.sendMessage(chatId, `📖 "${text}":\n${directMatch}`);
     }
 
-    // البحث عن أي كلمات من القاموس في النص
     const foundWords = {};
     Object.keys(dictionary).forEach(word => {
       if (text.includes(word)) {
@@ -142,7 +142,6 @@ bot.on('message', async (msg) => {
       }
     });
 
-    // إذا وجدنا كلمات من القاموس في النص، نعرضها أولاً
     if (Object.keys(foundWords).length > 0) {
       let response = `🔍 وجدت هذه الكلمات في القاموس:\n\n`;
       for (const [word, meaning] of Object.entries(foundWords)) {
@@ -151,7 +150,6 @@ bot.on('message', async (msg) => {
       await bot.sendMessage(chatId, response);
     }
 
-    // ثم ننتقل إلى شرح Gemini
     const loadingMsg = await bot.sendMessage(chatId, '🔍 جاري البحث عن الشرح...');
     const explanation = await explainWithGemini(text);
 
@@ -182,7 +180,6 @@ app.post('/webhook', (req, res) => {
   }
 });
 
-// تشغيل الخادم
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
   console.log(`🚀 الخادم يعمل على البورت ${PORT}`);
@@ -197,15 +194,13 @@ app.listen(PORT, async () => {
   }
 });
 
-// تحسين معالجة الأخطاء
 process.on('unhandledRejection', (error) => {
   console.error('⚠️ خطأ غير معالج:', error);
 });
 
-// تنظيف الذاكرة بانتظام
 setInterval(() => {
   if (global.gc) {
     global.gc();
     console.log('🧹 تم تنظيف الذاكرة');
   }
-}, 3600000); // كل ساعة
+}, 3600000);
