@@ -1,23 +1,11 @@
+require('dotenv').config();
 const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 
-// تحميل المتغيرات من .env فقط إذا كان الملف موجوداً
-if (fs.existsSync('.env')) {
-  require('dotenv').config();
-}
-
-// طباعة المتغيرات لأغراض التصحيح
-console.log("=== فحص المتغيرات البيئية ===");
-console.log("TELEGRAM_BOT_TOKEN:", process.env.TELEGRAM_BOT_TOKEN ? "[موجود]" : "[مفقود]");
-console.log("GEMINI_API_KEY:", process.env.GEMINI_API_KEY ? "[موجود]" : "[مفقود]");
-console.log("WEBHOOK_URL:", process.env.WEBHOOK_URL ? "[موجود]" : "[مفقود]");
-console.log("WEBHOOK_SECRET:", process.env.WEBHOOK_SECRET ? "[موجود]" : "[مفقود]");
-console.log("===============================");
-
-// تحقق من المتغيرات البيئية المطلوبة
+// تحقق من المتغيرات البيئية
 const requiredVars = {
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
   GEMINI_API_KEY: process.env.GEMINI_API_KEY,
@@ -27,12 +15,19 @@ const requiredVars = {
 
 for (const [name, value] of Object.entries(requiredVars)) {
   if (!value) {
-    console.warn(`⚠️ المتغير المطلوب مفقود: ${name}`);
+    console.error(`❌ المتغير المطلوب مفقود: ${name}`);
+    // لا نستخدم process.exit(1) لتجنب إيقاف السيرفر إن كان يعمل على ريندر
   }
 }
 
-const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN || '', { polling: false });
+const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN || 'invalid_token', { polling: false });
 const app = express();
+
+app.use(express.json());
+app.use((req, res, next) => {
+  console.log(`📩 ${req.method} ${req.path}`);
+  next();
+});
 
 // إدارة القاموس
 const DICTIONARY_PATH = path.join(__dirname, 'dictionary.json');
@@ -62,7 +57,7 @@ async function explainWithGemini(text) {
   });
 
   let prompt = `اشرح معنى "${text}" في لهجة عتمة اليمنية بشكل دقيق.`;
-  
+
   if (Object.keys(foundWords).length > 0) {
     prompt += `\n\nحسب قاموس محلي، تحتوي العبارة على الكلمات التالية:\n`;
     for (const [word, meaning] of Object.entries(foundWords)) {
@@ -167,12 +162,6 @@ bot.on('message', async (msg) => {
 });
 
 // إدارة الويب هوك
-app.use(express.json());
-app.use((req, res, next) => {
-  console.log(`📩 ${req.method} ${req.path}`);
-  next();
-});
-
 app.post('/webhook', (req, res) => {
   if (req.headers['x-telegram-bot-api-secret-token'] !== process.env.WEBHOOK_SECRET) {
     console.warn('⛔ محاولة وصول غير مصرح بها');
@@ -192,6 +181,12 @@ app.post('/webhook', (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
   console.log(`🚀 الخادم يعمل على البورت ${PORT}`);
+
+  if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.WEBHOOK_URL || !process.env.WEBHOOK_SECRET) {
+    console.warn('⚠️ لا يمكن تفعيل الويب هوك. تأكد من ضبط TELEGRAM_BOT_TOKEN و WEBHOOK_URL و WEBHOOK_SECRET');
+    return;
+  }
+
   try {
     await bot.setWebHook(`${process.env.WEBHOOK_URL}/webhook`, {
       secret_token: process.env.WEBHOOK_SECRET,
@@ -203,11 +198,12 @@ app.listen(PORT, async () => {
   }
 });
 
-// تنظيف الذاكرة ومعالجة الأخطاء
+// تحسين معالجة الأخطاء
 process.on('unhandledRejection', (error) => {
   console.error('⚠️ خطأ غير معالج:', error);
 });
 
+// تنظيف الذاكرة بانتظام
 setInterval(() => {
   if (global.gc) {
     global.gc();
